@@ -1,1 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PlaySculpt Auth</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, Helvetica, sans-serif;
+        background: #f2f2f2;
+        color: #222;
+      }
 
+      .container {
+        max-width: 420px;
+        margin: 40px auto;
+        background: #fff;
+        border: 1px solid #ccc;
+        padding: 20px;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+      }
+
+      h1,
+      h2 {
+        margin-top: 0;
+      }
+
+      .tabs {
+        margin-bottom: 16px;
+      }
+
+      .tabs button {
+        border: 1px solid #999;
+        background: #eee;
+        padding: 8px 12px;
+        cursor: pointer;
+        margin-right: 6px;
+      }
+
+      .tabs button.active {
+        background: #dce8ff;
+        border-color: #4f7fd9;
+      }
+
+      .form-panel {
+        display: none;
+      }
+
+      .form-panel.active {
+        display: block;
+      }
+
+      label {
+        display: block;
+        margin: 10px 0 4px;
+      }
+
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #aaa;
+        padding: 8px;
+      }
+
+      .btn {
+        margin-top: 14px;
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #2f5fb8;
+        background: #4f7fd9;
+        color: white;
+        cursor: pointer;
+      }
+
+      .error {
+        background: #ffe5e5;
+        color: #8d1010;
+        border: 1px solid #d89999;
+        padding: 10px;
+        margin-bottom: 12px;
+        display: none;
+      }
+
+      .success {
+        background: #e8f7e8;
+        color: #216821;
+        border: 1px solid #9cc79c;
+        padding: 10px;
+        margin-bottom: 12px;
+        display: none;
+      }
+
+      #dashboard {
+        display: none;
+      }
+
+      .stat-list {
+        list-style: none;
+        padding: 0;
+      }
+
+      .stat-list li {
+        border-bottom: 1px solid #ddd;
+        padding: 6px 0;
+      }
+
+      .small {
+        color: #666;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container" id="authApp">
+      <h1>PlaySculpt</h1>
+      <p class="small">Sign up or log in to access your dashboard.</p>
+
+      <div id="authError" class="error"></div>
+      <div id="authSuccess" class="success"></div>
+
+      <div class="tabs">
+        <button id="showLogin" class="active" type="button">Login</button>
+        <button id="showSignup" type="button">Signup</button>
+      </div>
+
+      <div id="loginPanel" class="form-panel active">
+        <h2>Login</h2>
+        <form id="loginForm">
+          <label for="loginUsername">Username</label>
+          <input id="loginUsername" name="username" maxlength="20" required />
+
+          <label for="loginPassword">Password</label>
+          <input
+            id="loginPassword"
+            name="password"
+            type="password"
+            minlength="8"
+            maxlength="100"
+            required
+          />
+
+          <button class="btn" type="submit">Login</button>
+        </form>
+      </div>
+
+      <div id="signupPanel" class="form-panel">
+        <h2>Signup</h2>
+        <form id="signupForm">
+          <label for="signupUsername">Username</label>
+          <input id="signupUsername" name="username" maxlength="20" required />
+
+          <label for="signupPassword">Password</label>
+          <input
+            id="signupPassword"
+            name="password"
+            type="password"
+            minlength="8"
+            maxlength="100"
+            required
+          />
+
+          <button class="btn" type="submit">Create account</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="container" id="dashboard">
+      <h1>Dashboard</h1>
+      <p id="welcomeText"></p>
+      <ul class="stat-list">
+        <li>SculptCoins: <strong id="coins">0</strong></li>
+        <li>Diamonds: <strong id="diamonds">0</strong></li>
+        <li>Points: <strong id="points">0</strong></li>
+        <li>Friends: <strong id="friends">0</strong></li>
+        <li>Friend requests: <strong id="requests">0</strong></li>
+        <li>Notifications: <strong id="notifications">0</strong></li>
+        <li>Created: <strong id="createdAt">-</strong></li>
+      </ul>
+      <button id="logoutBtn" class="btn" type="button">Logout</button>
+    </div>
+
+    <script>
+      const authApp = document.getElementById('authApp');
+      const dashboard = document.getElementById('dashboard');
+      const loginPanel = document.getElementById('loginPanel');
+      const signupPanel = document.getElementById('signupPanel');
+      const showLoginBtn = document.getElementById('showLogin');
+      const showSignupBtn = document.getElementById('showSignup');
+      const authError = document.getElementById('authError');
+      const authSuccess = document.getElementById('authSuccess');
+
+      function showError(message) {
+        authSuccess.style.display = 'none';
+        authError.textContent = message;
+        authError.style.display = 'block';
+      }
+
+      function showSuccess(message) {
+        authError.style.display = 'none';
+        authSuccess.textContent = message;
+        authSuccess.style.display = 'block';
+      }
+
+      function clearMessages() {
+        authError.style.display = 'none';
+        authSuccess.style.display = 'none';
+      }
+
+      function togglePanel(panel) {
+        clearMessages();
+        if (panel === 'signup') {
+          loginPanel.classList.remove('active');
+          signupPanel.classList.add('active');
+          showLoginBtn.classList.remove('active');
+          showSignupBtn.classList.add('active');
+        } else {
+          signupPanel.classList.remove('active');
+          loginPanel.classList.add('active');
+          showSignupBtn.classList.remove('active');
+          showLoginBtn.classList.add('active');
+        }
+      }
+
+      function renderDashboard(user) {
+        authApp.style.display = 'none';
+        dashboard.style.display = 'block';
+
+        document.getElementById('welcomeText').textContent = `Welcome, ${user.username}`;
+        document.getElementById('coins').textContent = user.sculptCoins;
+        document.getElementById('diamonds').textContent = user.diamonds;
+        document.getElementById('points').textContent = user.points;
+        document.getElementById('friends').textContent = user.friends.length;
+        document.getElementById('requests').textContent = user.friendRequests.length;
+        document.getElementById('notifications').textContent = user.notifications.length;
+        document.getElementById('createdAt').textContent = new Date(user.createdAt).toLocaleString();
+      }
+
+      function renderAuth() {
+        dashboard.style.display = 'none';
+        authApp.style.display = 'block';
+      }
+
+      async function postJSON(url, body) {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || 'Request failed.');
+        }
+
+        return data;
+      }
+
+      async function checkSession() {
+        try {
+          const response = await fetch('/api/me');
+          if (!response.ok) {
+            renderAuth();
+            return;
+          }
+
+          const data = await response.json();
+          renderDashboard(data.user);
+        } catch (error) {
+          renderAuth();
+        }
+      }
+
+      document.getElementById('signupForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        clearMessages();
+
+        const username = document.getElementById('signupUsername').value;
+        const password = document.getElementById('signupPassword').value;
+
+        try {
+          const data = await postJSON('/api/signup', { username, password });
+          showSuccess(data.message || 'Signup successful. Redirecting...');
+          renderDashboard(data.user);
+        } catch (error) {
+          showError(error.message);
+        }
+      });
+
+      document.getElementById('loginForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        clearMessages();
+
+        const username = document.getElementById('loginUsername').value;
+        const password = document.getElementById('loginPassword').value;
+
+        try {
+          const data = await postJSON('/api/login', { username, password });
+          showSuccess(data.message || 'Login successful. Redirecting...');
+          renderDashboard(data.user);
+        } catch (error) {
+          showError(error.message);
+        }
+      });
+
+      document.getElementById('logoutBtn').addEventListener('click', async () => {
+        try {
+          await postJSON('/api/logout', {});
+          renderAuth();
+          togglePanel('login');
+          showSuccess('Logged out.');
+        } catch (error) {
+          alert(error.message || 'Logout failed.');
+        }
+      });
+
+      showLoginBtn.addEventListener('click', () => togglePanel('login'));
+      showSignupBtn.addEventListener('click', () => togglePanel('signup'));
+
+      checkSession();
+    </script>
+  </body>
+</html>
