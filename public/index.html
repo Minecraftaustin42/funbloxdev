@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PlaySculpt Login</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Tahoma, Arial, sans-serif;
+        background: linear-gradient(#dbe8ff, #f2f6ff 220px, #e8edf7);
+        color: #1d2b42;
+      }
+
+      .container {
+        max-width: 460px;
+        margin: 52px auto;
+        background: #fff;
+        border: 1px solid #9cb3de;
+        box-shadow: 0 2px 0 #c6d5f2, 0 8px 18px rgba(20, 40, 80, 0.14);
+        padding: 18px;
+      }
+
+      h1 {
+        margin: 0 0 6px;
+      }
+
+      .small {
+        color: #4b5f7d;
+        margin: 0 0 16px;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      .tabs button {
+        border: 1px solid #7796d6;
+        background: #eaf1ff;
+        color: #214a9c;
+        padding: 7px 12px;
+        cursor: pointer;
+      }
+
+      .tabs button.active {
+        background: #5684de;
+        color: #fff;
+      }
+
+      .form-panel {
+        display: none;
+      }
+
+      .form-panel.active {
+        display: block;
+      }
+
+      label {
+        display: block;
+        margin: 10px 0 5px;
+        font-size: 14px;
+      }
+
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 9px;
+        border: 1px solid #9fb2d3;
+        border-radius: 3px;
+      }
+
+      .btn {
+        margin-top: 12px;
+        width: 100%;
+        border: 1px solid #2f5fb8;
+        background: linear-gradient(#6695f0, #4f7fd9);
+        color: #fff;
+        font-weight: bold;
+        padding: 10px;
+        cursor: pointer;
+      }
+
+      .error,
+      .success {
+        border: 1px solid;
+        padding: 10px;
+        margin-bottom: 10px;
+        display: none;
+      }
+
+      .error {
+        background: #ffe6e6;
+        border-color: #d39d9d;
+        color: #8a1b1b;
+      }
+
+      .success {
+        background: #e7f8ea;
+        border-color: #9bc49f;
+        color: #216b2c;
+      }
+
+      .footer-link {
+        margin-top: 12px;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>PlaySculpt</h1>
+      <p class="small">Welcome back! Log in or create your account.</p>
+
+      <div id="authError" class="error"></div>
+      <div id="authSuccess" class="success"></div>
+
+      <div class="tabs">
+        <button id="showLogin" class="active" type="button">Login</button>
+        <button id="showSignup" type="button">Signup</button>
+      </div>
+
+      <div id="loginPanel" class="form-panel active">
+        <form id="loginForm">
+          <label for="loginUsername">Username</label>
+          <input id="loginUsername" name="username" maxlength="20" required />
+
+          <label for="loginPassword">Password</label>
+          <input id="loginPassword" name="password" type="password" minlength="8" maxlength="100" required />
+
+          <button class="btn" type="submit">Login</button>
+        </form>
+      </div>
+
+      <div id="signupPanel" class="form-panel">
+        <form id="signupForm">
+          <label for="signupUsername">Username</label>
+          <input id="signupUsername" name="username" maxlength="20" required />
+
+          <label for="signupPassword">Password</label>
+          <input id="signupPassword" name="password" type="password" minlength="8" maxlength="100" required />
+
+          <button class="btn" type="submit">Create account</button>
+        </form>
+      </div>
+
+      <p class="footer-link">After login you will be redirected to your dashboard automatically.</p>
+    </div>
+
+    <script>
+      const loginPanel = document.getElementById('loginPanel');
+      const signupPanel = document.getElementById('signupPanel');
+      const showLoginBtn = document.getElementById('showLogin');
+      const showSignupBtn = document.getElementById('showSignup');
+      const authError = document.getElementById('authError');
+      const authSuccess = document.getElementById('authSuccess');
+
+      function showError(message) {
+        authSuccess.style.display = 'none';
+        authError.textContent = message;
+        authError.style.display = 'block';
+      }
+
+      function showSuccess(message) {
+        authError.style.display = 'none';
+        authSuccess.textContent = message;
+        authSuccess.style.display = 'block';
+      }
+
+      function clearMessages() {
+        authError.style.display = 'none';
+        authSuccess.style.display = 'none';
+      }
+
+      function togglePanel(panel) {
+        clearMessages();
+
+        if (panel === 'signup') {
+          loginPanel.classList.remove('active');
+          signupPanel.classList.add('active');
+          showLoginBtn.classList.remove('active');
+          showSignupBtn.classList.add('active');
+          return;
+        }
+
+        signupPanel.classList.remove('active');
+        loginPanel.classList.add('active');
+        showSignupBtn.classList.remove('active');
+        showLoginBtn.classList.add('active');
+      }
+
+      async function postJSON(url, body) {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Request failed.');
+        }
+
+        return data;
+      }
+
+      async function checkSession() {
+        const response = await fetch('/api/me');
+        if (!response.ok) {
+          return;
+        }
+
+        window.location.href = '/dashboard.html';
+      }
+
+      document.getElementById('signupForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        clearMessages();
+
+        const username = document.getElementById('signupUsername').value;
+        const password = document.getElementById('signupPassword').value;
+
+        try {
+          const data = await postJSON('/api/signup', { username, password });
+          showSuccess(data.message || 'Signup successful. Redirecting...');
+          window.location.href = '/dashboard.html';
+        } catch (error) {
+          showError(error.message);
+        }
+      });
+
+      document.getElementById('loginForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        clearMessages();
+
+        const username = document.getElementById('loginUsername').value;
+        const password = document.getElementById('loginPassword').value;
+
+        try {
+          const data = await postJSON('/api/login', { username, password });
+          showSuccess(data.message || 'Login successful. Redirecting...');
+          window.location.href = '/dashboard.html';
+        } catch (error) {
+          showError(error.message);
+        }
+      });
+
+      showLoginBtn.addEventListener('click', () => togglePanel('login'));
+      showSignupBtn.addEventListener('click', () => togglePanel('signup'));
+
+      checkSession().catch(() => {});
+    </script>
+  </body>
+</html>

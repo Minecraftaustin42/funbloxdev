@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PlaySculpt Dashboard</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Verdana, Tahoma, sans-serif;
+        background: #d7e4fb;
+        color: #1f2d46;
+      }
+
+      .topbar {
+        background: linear-gradient(#517ed4, #3d69bf);
+        color: #fff;
+        border-bottom: 1px solid #274a95;
+        padding: 10px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .brand {
+        font-weight: bold;
+        letter-spacing: 0.4px;
+      }
+
+      .btn {
+        border: 1px solid #2e5cb0;
+        background: linear-gradient(#75a0ef, #4f7fd9);
+        color: #fff;
+        padding: 8px 12px;
+        cursor: pointer;
+        border-radius: 3px;
+      }
+
+      .container {
+        max-width: 1100px;
+        margin: 14px auto;
+        padding: 0 12px 14px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1.1fr 1fr 1fr;
+        gap: 12px;
+      }
+
+      .card {
+        border: 1px solid #97add7;
+        background: #f8fbff;
+        box-shadow: 0 1px 0 #c9d7f0;
+        border-radius: 4px;
+        padding: 12px;
+      }
+
+      .card h3 {
+        margin-top: 0;
+      }
+
+      .profile-head {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .avatar {
+        width: 88px;
+        height: 88px;
+        border: 1px solid #7d95c6;
+        border-radius: 6px;
+        background: #d7e4fb;
+        object-fit: cover;
+      }
+
+      .stats {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+
+      .stats li {
+        padding: 6px 0;
+        border-bottom: 1px solid #d5e0f4;
+      }
+
+      .quick-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+        gap: 8px;
+      }
+
+      .quick-grid button {
+        border: 1px solid #7690bf;
+        background: #edf3ff;
+        color: #1f3e7c;
+        padding: 10px;
+        cursor: pointer;
+        font-weight: bold;
+      }
+
+      .notification-item {
+        background: #fff;
+        border: 1px solid #d9e3f7;
+        padding: 8px;
+        margin-bottom: 8px;
+        border-radius: 3px;
+        font-size: 13px;
+      }
+
+      .muted {
+        color: #4f5f7e;
+        font-size: 13px;
+      }
+
+      @media (max-width: 900px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="brand">PlaySculpt Home</div>
+      <div>
+        <button id="profileNav" class="btn" type="button">My Profile</button>
+        <button id="logoutBtn" class="btn" type="button">Logout</button>
+      </div>
+    </div>
+
+    <div class="container">
+      <div id="errorBox" class="card" style="display: none; color: #8f1f1f; background: #ffe5e5"></div>
+
+      <div class="grid">
+        <section class="card">
+          <h3>Welcome Back</h3>
+          <div class="profile-head">
+            <img id="avatarPreview" class="avatar" src="/assets/default-avatar.svg" alt="Avatar preview" />
+            <div>
+              <div><strong id="usernameText">Loading...</strong></div>
+              <div class="muted">Member since <span id="joinDateText">-</span></div>
+              <div class="muted">Friends: <span id="friendsCount">0</span></div>
+            </div>
+          </div>
+
+          <ul class="stats" style="margin-top: 10px">
+            <li>SculptCoins: <strong id="coinsText">0</strong></li>
+            <li>Diamonds: <strong id="diamondsText">0</strong></li>
+            <li>Points: <strong id="pointsText">0</strong></li>
+            <li>Friend Requests: <strong id="requestsText">0</strong></li>
+          </ul>
+        </section>
+
+        <section class="card">
+          <h3>Daily Reward</h3>
+          <p id="dailyRewardText">Loading reward...</p>
+          <p class="muted" id="dailyRewardSubText"></p>
+
+          <h3 style="margin-top: 18px">Quick Access</h3>
+          <div class="quick-grid" id="quickLinks"></div>
+        </section>
+
+        <section class="card">
+          <h3>Notifications</h3>
+          <div id="notificationsList"></div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      let currentUsername = '';
+
+      function setError(message) {
+        const errorBox = document.getElementById('errorBox');
+        errorBox.textContent = message;
+        errorBox.style.display = 'block';
+      }
+
+      function formatDate(isoDate) {
+        try {
+          return new Date(isoDate).toLocaleDateString();
+        } catch {
+          return '-';
+        }
+      }
+
+      function renderDashboard(payload) {
+        currentUsername = payload.user.username;
+        document.getElementById('usernameText').textContent = payload.user.username;
+        document.getElementById('coinsText').textContent = payload.user.sculptCoins;
+        document.getElementById('diamondsText').textContent = payload.user.diamonds;
+        document.getElementById('pointsText').textContent = payload.user.points;
+        document.getElementById('friendsCount').textContent = payload.social.friendsCount;
+        document.getElementById('requestsText').textContent = payload.social.friendRequestCount;
+        document.getElementById('joinDateText').textContent = formatDate(payload.user.createdAt);
+        document.getElementById('avatarPreview').src = payload.user.avatarPreview || '/assets/default-avatar.svg';
+
+        const rewardText = payload.dailyReward.claimedToday
+          ? `Today's ${payload.dailyReward.amount} ${payload.dailyReward.currency} reward has been claimed.`
+          : `You can claim ${payload.dailyReward.amount} ${payload.dailyReward.currency} today!`;
+
+        document.getElementById('dailyRewardText').textContent = rewardText;
+        document.getElementById('dailyRewardSubText').textContent = payload.dailyReward.claimedToday
+          ? `Next claim opens on ${new Date(payload.dailyReward.nextClaimAt).toLocaleString()}.`
+          : 'Login daily to keep your reward streak going!';
+
+        const notificationsList = document.getElementById('notificationsList');
+        notificationsList.innerHTML = '';
+
+        if (!payload.notifications.length) {
+          notificationsList.innerHTML = '<p class="muted">No notifications yet.</p>';
+        } else {
+          payload.notifications.forEach((note) => {
+            const item = document.createElement('div');
+            item.className = 'notification-item';
+            item.textContent = note;
+            notificationsList.appendChild(item);
+          });
+        }
+
+        const quickLinks = document.getElementById('quickLinks');
+        quickLinks.innerHTML = '';
+        payload.quickLinks.forEach((name) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = name;
+          btn.addEventListener('click', () => {
+            if (name === 'Profile') {
+              window.location.href = `/profile.html?username=${encodeURIComponent(currentUsername)}`;
+              return;
+            }
+
+            alert(`${name} is coming soon in this prototype.`);
+          });
+          quickLinks.appendChild(btn);
+        });
+      }
+
+      async function loadDashboard() {
+        const response = await fetch('/api/dashboard-data');
+
+        if (response.status === 401) {
+          window.location.href = '/';
+          return;
+        }
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Could not load dashboard.');
+        }
+
+        renderDashboard(data);
+      }
+
+      document.getElementById('logoutBtn').addEventListener('click', async () => {
+        const response = await fetch('/api/logout', { method: 'POST' });
+        if (response.ok) {
+          window.location.href = '/';
+          return;
+        }
+
+        setError('Logout failed. Please try again.');
+      });
+
+      document.getElementById('profileNav').addEventListener('click', () => {
+        if (!currentUsername) {
+          return;
+        }
+
+        window.location.href = `/profile.html?username=${encodeURIComponent(currentUsername)}`;
+      });
+
+      loadDashboard().catch((error) => setError(error.message));
+    </script>
+  </body>
+</html>

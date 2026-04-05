@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Edit Profile - PlaySculpt</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Verdana, Arial, sans-serif;
+        background: #e5edfb;
+        color: #20304f;
+      }
+
+      .container {
+        max-width: 720px;
+        margin: 24px auto;
+        background: #fff;
+        border: 1px solid #9eb4dd;
+        box-shadow: 0 1px 0 #c4d3ef;
+        padding: 16px;
+      }
+
+      .row {
+        margin-bottom: 12px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      textarea,
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #9bb1da;
+        padding: 8px;
+      }
+
+      textarea {
+        min-height: 110px;
+        resize: vertical;
+      }
+
+      .btn {
+        border: 1px solid #2f5eb5;
+        background: linear-gradient(#75a0ef, #4f7fd9);
+        color: #fff;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      .hint {
+        color: #4f6184;
+        font-size: 13px;
+      }
+
+      .msg {
+        padding: 10px;
+        border: 1px solid;
+        margin-bottom: 10px;
+        display: none;
+      }
+
+      .error {
+        background: #ffe7e7;
+        border-color: #d59a9a;
+        color: #901f1f;
+      }
+
+      .ok {
+        background: #e8f9eb;
+        border-color: #97c59b;
+        color: #216e2d;
+      }
+
+      .top-actions {
+        margin-bottom: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="top-actions">
+        <button id="backBtn" class="btn" type="button">Back to Profile</button>
+      </div>
+
+      <h1>Edit Profile</h1>
+      <p class="hint">Only your own profile can be edited. Bio max 280 characters.</p>
+
+      <div id="errorMsg" class="msg error"></div>
+      <div id="okMsg" class="msg ok"></div>
+
+      <form id="editForm">
+        <div class="row">
+          <label for="usernameInput">Username</label>
+          <input id="usernameInput" type="text" disabled />
+        </div>
+
+        <div class="row">
+          <label for="statusInput">Status</label>
+          <input id="statusInput" type="text" maxlength="80" />
+        </div>
+
+        <div class="row">
+          <label for="themeColorInput">Theme Color (hex)</label>
+          <input id="themeColorInput" type="text" placeholder="#4f7fd9" maxlength="7" />
+        </div>
+
+        <div class="row">
+          <label for="bioInput">Bio</label>
+          <textarea id="bioInput" maxlength="280"></textarea>
+          <div class="hint"><span id="bioCount">0</span>/280</div>
+        </div>
+
+        <button class="btn" type="submit">Save Profile</button>
+      </form>
+    </div>
+
+    <script>
+      let currentUsername = '';
+
+      function showError(message) {
+        const errorMsg = document.getElementById('errorMsg');
+        const okMsg = document.getElementById('okMsg');
+        okMsg.style.display = 'none';
+        errorMsg.textContent = message;
+        errorMsg.style.display = 'block';
+      }
+
+      function showOk(message) {
+        const errorMsg = document.getElementById('errorMsg');
+        const okMsg = document.getElementById('okMsg');
+        errorMsg.style.display = 'none';
+        okMsg.textContent = message;
+        okMsg.style.display = 'block';
+      }
+
+      function updateBioCounter() {
+        const bio = document.getElementById('bioInput').value;
+        document.getElementById('bioCount').textContent = bio.length;
+      }
+
+      async function loadOwnProfile() {
+        const meResponse = await fetch('/api/me');
+        if (meResponse.status === 401) {
+          window.location.href = '/';
+          return;
+        }
+
+        const meData = await meResponse.json().catch(() => ({}));
+        if (!meResponse.ok || !meData.user) {
+          throw new Error(meData.error || 'Could not resolve current user.');
+        }
+
+        currentUsername = meData.user.username;
+        const profileResponse = await fetch(`/api/profile/${encodeURIComponent(currentUsername)}`);
+        const profileData = await profileResponse.json().catch(() => ({}));
+
+        if (!profileResponse.ok) {
+          throw new Error(profileData.error || 'Could not load profile.');
+        }
+
+        if (!profileData.profile.canEdit) {
+          throw new Error('You are not allowed to edit this profile.');
+        }
+
+        document.getElementById('usernameInput').value = profileData.profile.username;
+        document.getElementById('statusInput').value = profileData.profile.status || '';
+        document.getElementById('themeColorInput').value = profileData.profile.themeColor || '#4f7fd9';
+        document.getElementById('bioInput').value = profileData.profile.bio || '';
+        updateBioCounter();
+      }
+
+      document.getElementById('bioInput').addEventListener('input', updateBioCounter);
+
+      document.getElementById('editForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const payload = {
+          username: currentUsername,
+          status: document.getElementById('statusInput').value,
+          themeColor: document.getElementById('themeColorInput').value,
+          bio: document.getElementById('bioInput').value,
+        };
+
+        const response = await fetch('/api/profile/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          showError(data.error || 'Failed to update profile.');
+          return;
+        }
+
+        showOk(data.message || 'Profile updated.');
+      });
+
+      document.getElementById('backBtn').addEventListener('click', () => {
+        if (!currentUsername) {
+          window.location.href = '/dashboard.html';
+          return;
+        }
+
+        window.location.href = `/profile.html?username=${encodeURIComponent(currentUsername)}`;
+      });
+
+      loadOwnProfile().catch((error) => showError(error.message));
+    </script>
+  </body>
+</html>
