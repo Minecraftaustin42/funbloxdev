@@ -13,6 +13,7 @@ const USERS_FILE = path.join(__dirname, 'users.json');
 const NOTIFICATIONS_FILE = path.join(__dirname, 'notifications.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 const GROUPS_FILE = path.join(__dirname, 'groups.json');
+const GAMES_FILE = path.join(__dirname, 'games.json');
 
 const MAX_MESSAGE_LENGTH = 600;
 const MAX_BIO_LENGTH = 280;
@@ -99,7 +100,7 @@ function ensureUserShape(user) {
       friendRequests: [],
       sentFriendRequests: [],
       notifications: [],
-      avatar: {},
+      avatar: sanitizeAvatar({}),
       createdAt: new Date().toISOString(),
       lastDailyRewardAt: null,
       profile: {
@@ -119,7 +120,7 @@ function ensureUserShape(user) {
   user.friendRequests = uniqueStringArray(user.friendRequests);
   user.sentFriendRequests = uniqueStringArray(user.sentFriendRequests);
   user.notifications = Array.isArray(user.notifications) ? user.notifications : [];
-  user.avatar = user.avatar && typeof user.avatar === 'object' ? user.avatar : {};
+  user.avatar = sanitizeAvatar(user.avatar);
 
   if (!user.profile || typeof user.profile !== 'object') {
     user.profile = {};
@@ -172,6 +173,88 @@ async function readGroups() {
 
 async function writeGroups(groups) {
   await writeArrayFile(GROUPS_FILE, groups);
+}
+
+async function readGames() {
+  return readArrayFile(GAMES_FILE);
+}
+
+async function writeGames(games) {
+  await writeArrayFile(GAMES_FILE, games);
+}
+
+function normalizeHexColor(value, fallback) {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const clean = value.trim();
+  if (!/^#[0-9A-Fa-f]{6}$/.test(clean)) {
+    return fallback;
+  }
+
+  return clean.toLowerCase();
+}
+
+function buildAvatarImageUrl(avatar) {
+  const safeAvatar = avatar && typeof avatar === 'object' ? avatar : {};
+  const skinColor = normalizeHexColor(safeAvatar.skinColor, '#f1c27d');
+  const shirtColor = normalizeHexColor(safeAvatar.shirt, '#4f7fd9');
+  const pantsColor = normalizeHexColor(safeAvatar.pants, '#2f4f8e');
+  const hatColor = normalizeHexColor(safeAvatar.hat, '#303030');
+
+  const faceType = typeof safeAvatar.face === 'string' ? safeAvatar.face : 'smile';
+  const hatType = typeof safeAvatar.hatType === 'string' ? safeAvatar.hatType : 'none';
+
+  const eyeY = 44;
+  const mouth =
+    faceType === 'serious'
+      ? '<line x1="48" y1="58" x2="80" y2="58" stroke="#222" stroke-width="3" />'
+      : faceType === 'wink'
+        ? '<path d="M47 58 Q65 71 81 57" stroke="#222" stroke-width="3" fill="none" />'
+        : '<path d="M47 56 Q64 72 81 56" stroke="#222" stroke-width="3" fill="none" />';
+
+  const eyes =
+    faceType === 'wink'
+      ? `<circle cx="50" cy="${eyeY}" r="3" fill="#222" /><line x1="73" y1="${eyeY}" x2="82" y2="${eyeY}" stroke="#222" stroke-width="3" />`
+      : `<circle cx="50" cy="${eyeY}" r="3" fill="#222" /><circle cx="78" cy="${eyeY}" r="3" fill="#222" />`;
+
+  const hat =
+    hatType === 'cap'
+      ? `<rect x="34" y="20" width="60" height="10" rx="5" fill="${hatColor}" /><rect x="58" y="30" width="40" height="7" rx="3" fill="${hatColor}" />`
+      : hatType === 'crown'
+        ? `<path d="M34 30 L42 14 L54 30 L64 14 L74 30 L86 14 L94 30 Z" fill="${hatColor}" />`
+        : '';
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+      <rect width="128" height="128" fill="#dfe9ff" />
+      ${hat}
+      <circle cx="64" cy="50" r="24" fill="${skinColor}" />
+      ${eyes}
+      ${mouth}
+      <rect x="38" y="76" width="52" height="26" rx="4" fill="${shirtColor}" />
+      <rect x="38" y="102" width="24" height="20" fill="${pantsColor}" />
+      <rect x="66" y="102" width="24" height="20" fill="${pantsColor}" />
+    </svg>
+  `;
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function sanitizeAvatar(avatar) {
+  const source = avatar && typeof avatar === 'object' ? avatar : {};
+  const safe = {
+    skinColor: normalizeHexColor(source.skinColor, '#f1c27d'),
+    shirt: normalizeHexColor(source.shirt, '#4f7fd9'),
+    pants: normalizeHexColor(source.pants, '#2f4f8e'),
+    face: ['smile', 'serious', 'wink'].includes(source.face) ? source.face : 'smile',
+    hatType: ['none', 'cap', 'crown'].includes(source.hatType) ? source.hatType : 'none',
+    hat: normalizeHexColor(source.hat, '#303030'),
+  };
+
+  safe.imageUrl = buildAvatarImageUrl(safe);
+  return safe;
 }
 
 function sanitizePermissionShape(permissions) {
@@ -544,7 +627,7 @@ app.post('/api/signup', async (req, res) => {
       friendRequests: [],
       sentFriendRequests: [],
       notifications: ['Welcome to PlaySculpt! Start building your first world.'],
-      avatar: {},
+      avatar: sanitizeAvatar({}),
       createdAt: now,
       lastDailyRewardAt: null,
       profile: {
@@ -642,6 +725,210 @@ app.get('/api/me', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Me route error:', error);
     return res.status(500).json({ error: 'Server error while fetching user.' });
+  }
+});
+
+app.get('/api/avatar/me', requireAuth, async (req, res) => {
+  try {
+    const users = await readUsers();
+    const user = users.find((item) => item.id === req.session.userId);
+
+    if (!user) {
+      return res.status(401).json({ error: 'Session invalid.' });
+    }
+
+    return res.json({ avatar: sanitizeAvatar(user.avatar) });
+  } catch (error) {
+    console.error('Avatar fetch error:', error);
+    return res.status(500).json({ error: 'Server error while loading avatar.' });
+  }
+});
+
+app.post('/api/avatar/update', requireAuth, async (req, res) => {
+  try {
+    const { username, avatar } = req.body || {};
+
+    const usernameError = validateUsername(username);
+    if (usernameError) {
+      return res.status(400).json({ error: usernameError });
+    }
+
+    const users = await readUsers();
+    const currentUser = users.find((item) => item.id === req.session.userId);
+
+    if (!currentUser) {
+      return res.status(401).json({ error: 'Session invalid.' });
+    }
+
+    if (currentUser.username.toLowerCase() !== username.trim().toLowerCase()) {
+      return res.status(403).json({ error: 'Only the profile owner can edit avatar.' });
+    }
+
+    currentUser.avatar = sanitizeAvatar(avatar);
+    await writeUsers(users);
+
+    return res.json({
+      message: 'Avatar updated successfully.',
+      avatar: currentUser.avatar,
+      user: toPublicUser(currentUser),
+    });
+  } catch (error) {
+    console.error('Avatar update error:', error);
+    return res.status(500).json({ error: 'Server error while saving avatar.' });
+  }
+});
+
+app.post('/api/games/create', requireAuth, async (req, res) => {
+  try {
+    const { title, description, thumbnail, isPublic, studioState } = req.body || {};
+
+    if (typeof title !== 'string' || !title.trim()) {
+      return res.status(400).json({ error: 'Game title is required.' });
+    }
+
+    const cleanTitle = title.trim();
+    if (cleanTitle.length < 3 || cleanTitle.length > 80) {
+      return res.status(400).json({ error: 'Game title must be 3 to 80 characters.' });
+    }
+
+    const cleanDescription = typeof description === 'string' ? description.trim() : '';
+    if (cleanDescription.length > 1000) {
+      return res.status(400).json({ error: 'Description must be 1000 characters or fewer.' });
+    }
+
+    const users = await readUsers();
+    const games = await readGames();
+    const currentUser = users.find((item) => item.id === req.session.userId);
+
+    if (!currentUser) {
+      return res.status(401).json({ error: 'Session invalid.' });
+    }
+
+    const now = new Date().toISOString();
+    const game = {
+      id: `game_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      title: cleanTitle,
+      description: cleanDescription,
+      creator: currentUser.username,
+      creatorUserId: currentUser.id,
+      thumbnail: typeof thumbnail === 'string' && thumbnail.trim() ? thumbnail.trim() : '/assets/default-avatar.svg',
+      visits: 0,
+      public: Boolean(isPublic),
+      studioState: studioState && typeof studioState === 'object' ? studioState : { objects: [] },
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    games.push(game);
+
+    ensureUserShape(currentUser);
+    currentUser.profile.gamesCreated = Number.isFinite(currentUser.profile.gamesCreated)
+      ? currentUser.profile.gamesCreated + 1
+      : 1;
+
+    await writeGames(games);
+    await writeUsers(users);
+
+    return res.status(201).json({ message: 'Game created.', game });
+  } catch (error) {
+    console.error('Game create error:', error);
+    return res.status(500).json({ error: 'Server error while creating game.' });
+  }
+});
+
+app.get('/api/games/my', requireAuth, async (req, res) => {
+  try {
+    const games = await readGames();
+    const ownGames = games
+      .filter((game) => game && game.creatorUserId === req.session.userId)
+      .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+
+    return res.json({ games: ownGames });
+  } catch (error) {
+    console.error('My games error:', error);
+    return res.status(500).json({ error: 'Server error while loading your games.' });
+  }
+});
+
+app.get('/api/games/:id', requireAuth, async (req, res) => {
+  try {
+    const games = await readGames();
+    const game = games.find((item) => item && item.id === req.params.id);
+
+    if (!game) {
+      return res.status(404).json({ error: 'Game not found.' });
+    }
+
+    const isCreator = game.creatorUserId === req.session.userId;
+    if (!game.public && !isCreator) {
+      return res.status(403).json({ error: 'This game is private.' });
+    }
+
+    game.visits = Number.isFinite(game.visits) ? game.visits + 1 : 1;
+    await writeGames(games);
+
+    return res.json({ game, isCreator });
+  } catch (error) {
+    console.error('Game detail error:', error);
+    return res.status(500).json({ error: 'Server error while loading game.' });
+  }
+});
+
+app.post('/api/games/update', requireAuth, async (req, res) => {
+  try {
+    const { id, title, description, thumbnail, isPublic, studioState } = req.body || {};
+
+    if (typeof id !== 'string' || !id.trim()) {
+      return res.status(400).json({ error: 'Game id is required.' });
+    }
+
+    const games = await readGames();
+    const game = games.find((item) => item && item.id === id.trim());
+
+    if (!game) {
+      return res.status(404).json({ error: 'Game not found.' });
+    }
+
+    if (game.creatorUserId !== req.session.userId) {
+      return res.status(403).json({ error: 'Only the creator can edit this game.' });
+    }
+
+    if (typeof title === 'string' && title.trim()) {
+      const cleanTitle = title.trim();
+      if (cleanTitle.length < 3 || cleanTitle.length > 80) {
+        return res.status(400).json({ error: 'Game title must be 3 to 80 characters.' });
+      }
+      game.title = cleanTitle;
+    }
+
+    if (typeof description === 'string') {
+      const cleanDescription = description.trim();
+      if (cleanDescription.length > 1000) {
+        return res.status(400).json({ error: 'Description must be 1000 characters or fewer.' });
+      }
+      game.description = cleanDescription;
+    }
+
+    if (typeof thumbnail === 'string' && thumbnail.trim()) {
+      game.thumbnail = thumbnail.trim();
+    }
+
+    if (typeof isPublic === 'boolean') {
+      game.public = isPublic;
+    }
+
+    if (studioState && typeof studioState === 'object') {
+      game.studioState = studioState;
+    }
+
+    game.updatedAt = new Date().toISOString();
+
+    await writeGames(games);
+
+    return res.json({ message: 'Game updated.', game });
+  } catch (error) {
+    console.error('Game update error:', error);
+    return res.status(500).json({ error: 'Server error while updating game.' });
   }
 });
 

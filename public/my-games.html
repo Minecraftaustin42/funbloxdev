@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Games - PlaySculpt</title>
+    <style>
+      body { margin:0; font-family:Verdana,sans-serif; background:#dfe9ff; color:#1f2d46; }
+      .wrap { max-width: 1000px; margin:0 auto; padding:14px; }
+      .card { background:#f8fbff; border:1px solid #97add7; border-radius:4px; padding:12px; margin-bottom:10px; }
+      .btn { border:1px solid #2e5cb0; background:linear-gradient(#75a0ef,#4f7fd9); color:#fff; padding:8px 12px; cursor:pointer; margin-right:6px; }
+      .game { border:1px solid #d8e4fa; background:#fff; border-radius:4px; padding:10px; margin-bottom:8px; }
+      .muted { color:#526188; font-size:13px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div style="margin-bottom:8px;">
+        <button class="btn" id="dashboardBtn" type="button">Dashboard</button>
+        <button class="btn" id="createBtn" type="button">Create Game</button>
+      </div>
+      <div id="errorBox" style="color:#8f1f1f"></div>
+      <div id="games" class="card">Loading...</div>
+    </div>
+
+    <script>
+      function setError(text) { document.getElementById('errorBox').textContent = text || ''; }
+      async function fetchJSON(url, options = {}) {
+        const response = await fetch(url, options);
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 401) { window.location.href = '/'; return null; }
+        if (!response.ok) throw new Error(data.error || 'Request failed.');
+        return data;
+      }
+
+      async function loadGames() {
+        const data = await fetchJSON('/api/games/my');
+        if (!data) return;
+        const root = document.getElementById('games');
+        const games = Array.isArray(data.games) ? data.games : [];
+
+        if (!games.length) {
+          root.innerHTML = '<div class="muted">No games created yet.</div>';
+          return;
+        }
+
+        root.innerHTML = games.map((game) => `
+          <div class="game">
+            <div><strong>${game.title || 'Untitled'}</strong></div>
+            <div class="muted">Visits: ${game.visits ?? 0} • ${game.public ? 'Public' : 'Private'} • Updated: ${game.updatedAt ? new Date(game.updatedAt).toLocaleString() : '-'}</div>
+            <div style="margin-top:8px;">
+              <button class="btn" type="button" onclick="window.location.href='/create-game.html?id=${encodeURIComponent(game.id)}'">Edit</button>
+              <button class="btn" type="button" onclick="window.location.href='/game.html?id=${encodeURIComponent(game.id)}'">View</button>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      document.getElementById('dashboardBtn').addEventListener('click', () => { window.location.href = '/dashboard.html'; });
+      document.getElementById('createBtn').addEventListener('click', () => { window.location.href = '/create-game.html'; });
+
+      loadGames().catch((error) => setError(error.message));
+    </script>
+  </body>
+</html>

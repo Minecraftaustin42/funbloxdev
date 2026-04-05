@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Avatar Studio - PlaySculpt</title>
+    <style>
+      body { margin: 0; font-family: Verdana, sans-serif; background: #dfe9ff; color: #1f2d46; }
+      .wrap { max-width: 1180px; margin: 0 auto; padding: 14px; }
+      .layout { display: grid; grid-template-columns: 320px 1fr; gap: 12px; }
+      .card { background: #f8fbff; border: 1px solid #97add7; border-radius: 4px; padding: 12px; }
+      label { display: block; margin-bottom: 8px; }
+      input, select { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; border: 1px solid #9db2dc; }
+      .btn { border: 1px solid #2e5cb0; background: linear-gradient(#75a0ef, #4f7fd9); color: #fff; padding: 8px 12px; cursor: pointer; margin-right: 6px; }
+      #viewer { width: 100%; height: 580px; border: 1px solid #9db2dc; background: #cfe0ff; }
+      .muted { color: #516188; font-size: 13px; }
+      @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } #viewer { height: 440px; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div style="margin-bottom: 10px">
+        <button class="btn" id="dashboardBtn" type="button">Dashboard</button>
+        <button class="btn" id="profileBtn" type="button">My Profile</button>
+      </div>
+
+      <div id="errorBox" style="color:#8f1f1f"></div>
+      <div id="statusBox" class="muted"></div>
+
+      <div class="layout">
+        <section class="card">
+          <h3 style="margin-top: 0">Customize Avatar</h3>
+          <p class="muted">Only your own avatar can be edited.</p>
+
+          <label>Skin Color <input id="skinColor" type="color" value="#f1c27d" /></label>
+          <label>Shirt Color <input id="shirtColor" type="color" value="#4f7fd9" /></label>
+          <label>Pants Color <input id="pantsColor" type="color" value="#2f4f8e" /></label>
+          <label>Face
+            <select id="faceSelect">
+              <option value="smile">Smile</option>
+              <option value="serious">Serious</option>
+              <option value="wink">Wink</option>
+            </select>
+          </label>
+          <label>Hat Type
+            <select id="hatTypeSelect">
+              <option value="none">None</option>
+              <option value="cap">Cap</option>
+              <option value="crown">Crown</option>
+            </select>
+          </label>
+          <label>Hat Color <input id="hatColor" type="color" value="#303030" /></label>
+
+          <button class="btn" id="saveBtn" type="button">Save Avatar</button>
+        </section>
+
+        <section class="card">
+          <h3 style="margin-top: 0">3D Character Viewer</h3>
+          <div id="viewer"></div>
+          <p class="muted">Live preview updates instantly while you customize.</p>
+        </section>
+      </div>
+    </div>
+
+    <script type="module">
+      import * as THREE from 'https://unpkg.com/three@0.162.0/build/three.module.js';
+      import { OrbitControls } from 'https://unpkg.com/three@0.162.0/examples/jsm/controls/OrbitControls.js';
+
+      let currentUsername = '';
+      const avatarState = {
+        skinColor: '#f1c27d',
+        shirt: '#4f7fd9',
+        pants: '#2f4f8e',
+        face: 'smile',
+        hatType: 'none',
+        hat: '#303030',
+      };
+
+      const errorBox = document.getElementById('errorBox');
+      const statusBox = document.getElementById('statusBox');
+
+      function setError(text) { errorBox.textContent = text || ''; }
+      function setStatus(text) { statusBox.textContent = text || ''; }
+
+      async function fetchJSON(url, options = {}) {
+        const response = await fetch(url, options);
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          window.location.href = '/';
+          return null;
+        }
+        if (!response.ok) throw new Error(data.error || 'Request failed.');
+        return data;
+      }
+
+      const viewer = document.getElementById('viewer');
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xcfe0ff);
+      const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
+      camera.position.set(3, 2.6, 4.5);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(viewer.clientWidth, viewer.clientHeight);
+      viewer.appendChild(renderer.domElement);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.target.set(0, 1.2, 0);
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+      const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+      dir.position.set(4, 8, 3);
+      scene.add(dir);
+
+      const floor = new THREE.Mesh(
+        new THREE.CircleGeometry(4, 64),
+        new THREE.MeshStandardMaterial({ color: 0xbfd3fa, roughness: 0.8 })
+      );
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.y = -1.02;
+      scene.add(floor);
+
+      const character = new THREE.Group();
+      scene.add(character);
+
+      const skinMat = new THREE.MeshStandardMaterial({ color: avatarState.skinColor });
+      const shirtMat = new THREE.MeshStandardMaterial({ color: avatarState.shirt });
+      const pantsMat = new THREE.MeshStandardMaterial({ color: avatarState.pants });
+      const hatMat = new THREE.MeshStandardMaterial({ color: avatarState.hat });
+
+      const torso = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.3, 0.7), shirtMat);
+      torso.position.y = 0.2;
+      character.add(torso);
+
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.95, 0.95), skinMat);
+      head.position.y = 1.45;
+      character.add(head);
+
+      const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.1, 0.45), pantsMat);
+      leftLeg.position.set(-0.25, -1.0, 0);
+      character.add(leftLeg);
+      const rightLeg = leftLeg.clone();
+      rightLeg.position.x = 0.25;
+      character.add(rightLeg);
+
+      const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.36, 1.05, 0.36), skinMat);
+      leftArm.position.set(-0.82, 0.15, 0);
+      character.add(leftArm);
+      const rightArm = leftArm.clone();
+      rightArm.position.x = 0.82;
+      character.add(rightArm);
+
+      const faceCanvas = document.createElement('canvas');
+      faceCanvas.width = 256;
+      faceCanvas.height = 256;
+      const faceCtx = faceCanvas.getContext('2d');
+      const faceTexture = new THREE.CanvasTexture(faceCanvas);
+      const facePlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.75, 0.75),
+        new THREE.MeshBasicMaterial({ map: faceTexture, transparent: true })
+      );
+      facePlane.position.set(0, 1.45, 0.48);
+      character.add(facePlane);
+
+      const hatGroup = new THREE.Group();
+      character.add(hatGroup);
+
+      function drawFace() {
+        faceCtx.clearRect(0, 0, 256, 256);
+        faceCtx.fillStyle = 'rgba(255,255,255,0)';
+        faceCtx.fillRect(0, 0, 256, 256);
+        faceCtx.fillStyle = '#1f1f1f';
+
+        if (avatarState.face === 'wink') {
+          faceCtx.beginPath();
+          faceCtx.arc(90, 95, 10, 0, Math.PI * 2);
+          faceCtx.fill();
+          faceCtx.lineWidth = 8;
+          faceCtx.beginPath();
+          faceCtx.moveTo(145, 95);
+          faceCtx.lineTo(178, 95);
+          faceCtx.stroke();
+          faceCtx.beginPath();
+          faceCtx.strokeStyle = '#1f1f1f';
+          faceCtx.lineWidth = 8;
+          faceCtx.arc(130, 155, 34, 0.25, Math.PI - 0.25);
+          faceCtx.stroke();
+        } else {
+          faceCtx.beginPath(); faceCtx.arc(90, 95, 10, 0, Math.PI * 2); faceCtx.fill();
+          faceCtx.beginPath(); faceCtx.arc(165, 95, 10, 0, Math.PI * 2); faceCtx.fill();
+          faceCtx.lineWidth = 8;
+          faceCtx.beginPath();
+          if (avatarState.face === 'serious') {
+            faceCtx.moveTo(90, 155); faceCtx.lineTo(170, 155);
+          } else {
+            faceCtx.arc(130, 145, 34, 0.20, Math.PI - 0.20);
+          }
+          faceCtx.stroke();
+        }
+
+        faceTexture.needsUpdate = true;
+      }
+
+      function rebuildHat() {
+        while (hatGroup.children.length) hatGroup.remove(hatGroup.children[0]);
+        if (avatarState.hatType === 'none') return;
+
+        if (avatarState.hatType === 'cap') {
+          const top = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.18, 24), hatMat);
+          top.position.set(0, 2.05, 0);
+          hatGroup.add(top);
+          const brim = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.07, 0.38), hatMat);
+          brim.position.set(0, 1.98, 0.44);
+          hatGroup.add(brim);
+        } else if (avatarState.hatType === 'crown') {
+          const base = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.17, 24), hatMat);
+          base.position.set(0, 2.02, 0);
+          hatGroup.add(base);
+          for (let i = 0; i < 6; i += 1) {
+            const spike = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.28, 8), hatMat);
+            const angle = (i / 6) * Math.PI * 2;
+            spike.position.set(Math.cos(angle) * 0.45, 2.25, Math.sin(angle) * 0.45);
+            hatGroup.add(spike);
+          }
+        }
+      }
+
+      function applyAvatarToModel() {
+        skinMat.color.set(avatarState.skinColor);
+        shirtMat.color.set(avatarState.shirt);
+        pantsMat.color.set(avatarState.pants);
+        hatMat.color.set(avatarState.hat);
+        drawFace();
+        rebuildHat();
+      }
+
+      function updateFromInputs() {
+        avatarState.skinColor = document.getElementById('skinColor').value;
+        avatarState.shirt = document.getElementById('shirtColor').value;
+        avatarState.pants = document.getElementById('pantsColor').value;
+        avatarState.face = document.getElementById('faceSelect').value;
+        avatarState.hatType = document.getElementById('hatTypeSelect').value;
+        avatarState.hat = document.getElementById('hatColor').value;
+        applyAvatarToModel();
+      }
+
+      function loadIntoInputs() {
+        document.getElementById('skinColor').value = avatarState.skinColor;
+        document.getElementById('shirtColor').value = avatarState.shirt;
+        document.getElementById('pantsColor').value = avatarState.pants;
+        document.getElementById('faceSelect').value = avatarState.face;
+        document.getElementById('hatTypeSelect').value = avatarState.hatType;
+        document.getElementById('hatColor').value = avatarState.hat;
+      }
+
+      async function init() {
+        const me = await fetchJSON('/api/me');
+        if (!me || !me.user) return;
+        currentUsername = me.user.username;
+
+        const data = await fetchJSON('/api/avatar/me');
+        if (data && data.avatar) Object.assign(avatarState, data.avatar);
+        loadIntoInputs();
+        applyAvatarToModel();
+      }
+
+      async function saveAvatar() {
+        try {
+          setError('');
+          updateFromInputs();
+
+          const response = await fetchJSON('/api/avatar/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: currentUsername, avatar: avatarState }),
+          });
+
+          setStatus(response?.message || 'Saved.');
+        } catch (error) {
+          setError(error.message);
+        }
+      }
+
+      ['skinColor', 'shirtColor', 'pantsColor', 'faceSelect', 'hatTypeSelect', 'hatColor'].forEach((id) => {
+        document.getElementById(id).addEventListener('input', updateFromInputs);
+        document.getElementById(id).addEventListener('change', updateFromInputs);
+      });
+
+      document.getElementById('saveBtn').addEventListener('click', saveAvatar);
+      document.getElementById('dashboardBtn').addEventListener('click', () => { window.location.href = '/dashboard.html'; });
+      document.getElementById('profileBtn').addEventListener('click', () => {
+        if (!currentUsername) return;
+        window.location.href = `/profile.html?username=${encodeURIComponent(currentUsername)}`;
+      });
+
+      function onResize() {
+        const w = viewer.clientWidth;
+        const h = viewer.clientHeight;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      }
+      window.addEventListener('resize', onResize);
+
+      function animate() {
+        requestAnimationFrame(animate);
+        character.rotation.y += 0.0035;
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      init().catch((error) => setError(error.message));
+      onResize();
+      animate();
+    </script>
+  </body>
+</html>
