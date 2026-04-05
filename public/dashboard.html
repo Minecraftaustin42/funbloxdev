@@ -5,6 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PlaySculpt Dashboard</title>
     <style>
+      body { margin: 0; font-family: Verdana, Tahoma, sans-serif; background: #d7e4fb; color: #1f2d46; }
+      .topbar { background: linear-gradient(#517ed4, #3d69bf); color: #fff; border-bottom: 1px solid #274a95; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; }
+      .brand { font-weight: bold; letter-spacing: 0.4px; }
+      .top-actions { display: flex; gap: 8px; align-items: center; }
+      .btn { border: 1px solid #2e5cb0; background: linear-gradient(#75a0ef, #4f7fd9); color: #fff; padding: 8px 12px; cursor: pointer; border-radius: 3px; }
+      .notif-wrap { position: relative; }
+      .badge { background: #f5cd4a; color: #2a2a2a; border-radius: 999px; padding: 1px 7px; font-size: 12px; margin-left: 4px; }
+      .notif-dropdown { position: absolute; top: 36px; right: 0; width: 320px; max-height: 350px; overflow: auto; background: #fff; border: 1px solid #8ea7d9; box-shadow: 0 6px 16px rgba(0,0,0,.2); display: none; z-index: 8; }
+      .notif-head { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #d6e2f6; }
+      .notif-item { border-bottom: 1px solid #edf2fd; padding: 8px; }
+      .notif-item.unread { background: #f6f9ff; }
+      .notif-item p { margin: 0 0 6px; font-size: 13px; }
+      .notif-item a { color: #264f9d; font-size: 12px; }
+      .notif-tools { display: flex; gap: 6px; margin-top: 4px; }
+      .mini-btn { border: 1px solid #8da7d8; background: #eef3ff; cursor: pointer; font-size: 12px; padding: 3px 6px; }
+      .container { max-width: 1100px; margin: 14px auto; padding: 0 12px 14px; }
+      .grid { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 12px; }
+      .card { border: 1px solid #97add7; background: #f8fbff; box-shadow: 0 1px 0 #c9d7f0; border-radius: 4px; padding: 12px; }
+      .profile-head { display: flex; gap: 12px; align-items: center; }
+      .avatar { width: 88px; height: 88px; border: 1px solid #7d95c6; border-radius: 6px; background: #d7e4fb; object-fit: cover; }
+      .stats { list-style: none; margin: 0; padding: 0; }
+      .stats li { padding: 6px 0; border-bottom: 1px solid #d5e0f4; }
+      .quick-grid { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 8px; }
+      .quick-grid button { border: 1px solid #7690bf; background: #edf3ff; color: #1f3e7c; padding: 10px; cursor: pointer; font-weight: bold; }
+      .notification-item { background: #fff; border: 1px solid #d9e3f7; padding: 8px; margin-bottom: 8px; border-radius: 3px; font-size: 13px; }
+      .muted { color: #4f5f7e; font-size: 13px; }
+      @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .notif-dropdown { right: -100px; } }
       body {
         margin: 0;
         font-family: Verdana, Tahoma, sans-serif;
@@ -125,6 +152,17 @@
   <body>
     <div class="topbar">
       <div class="brand">PlaySculpt Home</div>
+      <div class="top-actions">
+        <div class="notif-wrap">
+          <button id="notifToggle" class="btn" type="button">Notifications <span id="notifBadge" class="badge">0</span></button>
+          <div id="notifDropdown" class="notif-dropdown">
+            <div class="notif-head">
+              <strong>Notifications</strong>
+              <button id="markAllReadBtn" class="mini-btn" type="button">Mark all read</button>
+            </div>
+            <div id="notifList"></div>
+          </div>
+        </div>
       <div>
         <button id="profileNav" class="btn" type="button">My Profile</button>
         <button id="logoutBtn" class="btn" type="button">Logout</button>
@@ -132,6 +170,7 @@
     </div>
 
     <div class="container">
+      <div id="errorBox" class="card" style="display:none;color:#8f1f1f;background:#ffe5e5"></div>
       <div id="errorBox" class="card" style="display: none; color: #8f1f1f; background: #ffe5e5"></div>
 
       <div class="grid">
@@ -145,6 +184,7 @@
               <div class="muted">Friends: <span id="friendsCount">0</span></div>
             </div>
           </div>
+          <ul class="stats" style="margin-top:10px">
 
           <ul class="stats" style="margin-top: 10px">
             <li>SculptCoins: <strong id="coinsText">0</strong></li>
@@ -159,11 +199,14 @@
           <p id="dailyRewardText">Loading reward...</p>
           <p class="muted" id="dailyRewardSubText"></p>
 
+          <h3 style="margin-top:18px">Quick Access</h3>
           <h3 style="margin-top: 18px">Quick Access</h3>
           <div class="quick-grid" id="quickLinks"></div>
         </section>
 
         <section class="card">
+          <h3>Recent Notifications</h3>
+          <div id="notificationsPreview"></div>
           <h3>Notifications</h3>
           <div id="notificationsList"></div>
         </section>
@@ -180,6 +223,75 @@
       }
 
       function formatDate(isoDate) {
+        return new Date(isoDate).toLocaleString();
+      }
+
+      async function fetchJSON(url, options = {}) {
+        const response = await fetch(url, options);
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          window.location.href = '/';
+          return null;
+        }
+        if (!response.ok) {
+          throw new Error(data.error || 'Request failed.');
+        }
+        return data;
+      }
+
+      function renderNotifDropdown(notifications) {
+        const list = document.getElementById('notifList');
+        list.innerHTML = '';
+
+        if (!notifications.length) {
+          list.innerHTML = '<div class="notif-item"><p>No notifications yet.</p></div>';
+          return;
+        }
+
+        notifications.forEach((notification) => {
+          const row = document.createElement('div');
+          row.className = `notif-item ${notification.read ? '' : 'unread'}`;
+          row.innerHTML = `
+            <p>${notification.text}</p>
+            <div class="muted">${formatDate(notification.createdAt)}</div>
+            <div class="notif-tools">
+              ${notification.actionLink ? `<a href="${notification.actionLink}">Open</a>` : ''}
+              ${notification.read ? '' : '<button class="mini-btn mark-btn" type="button">Mark read</button>'}
+              <button class="mini-btn del-btn" type="button">Delete</button>
+            </div>
+          `;
+
+          const markBtn = row.querySelector('.mark-btn');
+          if (markBtn) {
+            markBtn.addEventListener('click', async () => {
+              await fetchJSON('/api/notifications/read', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: notification.id }),
+              });
+              await loadNotifications();
+            });
+          }
+
+          row.querySelector('.del-btn').addEventListener('click', async () => {
+            await fetchJSON('/api/notifications/delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: notification.id }),
+            });
+            await loadNotifications();
+          });
+
+          list.appendChild(row);
+        });
+      }
+
+      async function loadNotifications() {
+        const data = await fetchJSON('/api/notifications');
+        if (!data) return;
+
+        document.getElementById('notifBadge').textContent = data.unreadCount;
+        renderNotifDropdown(data.notifications);
         try {
           return new Date(isoDate).toLocaleDateString();
         } catch {
@@ -195,6 +307,13 @@
         document.getElementById('pointsText').textContent = payload.user.points;
         document.getElementById('friendsCount').textContent = payload.social.friendsCount;
         document.getElementById('requestsText').textContent = payload.social.friendRequestCount;
+        document.getElementById('joinDateText').textContent = new Date(payload.user.createdAt).toLocaleDateString();
+        document.getElementById('avatarPreview').src = payload.user.avatarPreview || '/assets/default-avatar.svg';
+
+        document.getElementById('dailyRewardText').textContent = payload.dailyReward.claimedToday
+          ? `Today's ${payload.dailyReward.amount} ${payload.dailyReward.currency} reward has been claimed.`
+          : `You can claim ${payload.dailyReward.amount} ${payload.dailyReward.currency} today!`;
+
         document.getElementById('joinDateText').textContent = formatDate(payload.user.createdAt);
         document.getElementById('avatarPreview').src = payload.user.avatarPreview || '/assets/default-avatar.svg';
 
@@ -206,6 +325,25 @@
         document.getElementById('dailyRewardSubText').textContent = payload.dailyReward.claimedToday
           ? `Next claim opens on ${new Date(payload.dailyReward.nextClaimAt).toLocaleString()}.`
           : 'Login daily to keep your reward streak going!';
+
+        const preview = document.getElementById('notificationsPreview');
+        preview.innerHTML = '';
+        if (!payload.notificationsPreview.length) {
+          preview.innerHTML = '<p class="muted">No notifications yet.</p>';
+        } else {
+          payload.notificationsPreview.forEach((notification) => {
+            const item = document.createElement('div');
+            item.className = 'notification-item';
+            item.textContent = notification.text;
+            preview.appendChild(item);
+          });
+        }
+
+        const routeMap = {
+          Friends: '/friends.html',
+          Profile: `/profile.html?username=${encodeURIComponent(currentUsername)}`,
+          Chat: '/chat.html',
+        };
 
         const notificationsList = document.getElementById('notificationsList');
         notificationsList.innerHTML = '';
@@ -228,6 +366,8 @@
           btn.type = 'button';
           btn.textContent = name;
           btn.addEventListener('click', () => {
+            if (routeMap[name]) {
+              window.location.href = routeMap[name];
             if (name === 'Profile') {
               window.location.href = `/profile.html?username=${encodeURIComponent(currentUsername)}`;
               return;
@@ -240,6 +380,8 @@
       }
 
       async function loadDashboard() {
+        const data = await fetchJSON('/api/dashboard-data');
+        if (!data) return;
         const response = await fetch('/api/dashboard-data');
 
         if (response.status === 401) {
@@ -257,6 +399,37 @@
       }
 
       document.getElementById('logoutBtn').addEventListener('click', async () => {
+        await fetchJSON('/api/logout', { method: 'POST' });
+        window.location.href = '/';
+      });
+
+      document.getElementById('profileNav').addEventListener('click', () => {
+        if (!currentUsername) return;
+        window.location.href = `/profile.html?username=${encodeURIComponent(currentUsername)}`;
+      });
+
+      document.getElementById('notifToggle').addEventListener('click', () => {
+        const dropdown = document.getElementById('notifDropdown');
+        dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
+      });
+
+      document.getElementById('markAllReadBtn').addEventListener('click', async () => {
+        await fetchJSON('/api/notifications/read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        await loadNotifications();
+      });
+
+      document.addEventListener('click', (event) => {
+        const wrap = document.querySelector('.notif-wrap');
+        if (!wrap.contains(event.target)) {
+          document.getElementById('notifDropdown').style.display = 'none';
+        }
+      });
+
+      Promise.all([loadDashboard(), loadNotifications()]).catch((error) => setError(error.message));
         const response = await fetch('/api/logout', { method: 'POST' });
         if (response.ok) {
           window.location.href = '/';

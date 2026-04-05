@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PlaySculpt Chat</title>
+    <style>
+      body { margin: 0; font-family: Verdana, Arial, sans-serif; background: #e8eefc; color: #203151; }
+      .wrap { max-width: 1080px; margin: 20px auto; padding: 0 12px; }
+      .bar { display: flex; gap: 8px; margin-bottom: 10px; }
+      .btn { border: 1px solid #2e5cb0; background: linear-gradient(#75a0ef, #4f7fd9); color: #fff; padding: 8px 12px; cursor: pointer; }
+      .layout { display: grid; grid-template-columns: 300px 1fr; gap: 12px; }
+      .panel { background: #fff; border: 1px solid #96abd7; padding: 10px; }
+      .user-item { border: 1px solid #d4e0f6; background: #fafdff; padding: 8px; margin-bottom: 8px; cursor: pointer; }
+      .user-item.active { border-color: #5f86d4; background: #eef4ff; }
+      .muted { color: #586b92; font-size: 12px; }
+      .messages { border: 1px solid #d4e0f6; background: #fbfdff; height: 390px; overflow: auto; padding: 8px; }
+      .message { margin-bottom: 8px; max-width: 75%; padding: 7px; border-radius: 5px; }
+      .mine { margin-left: auto; background: #d8e6ff; border: 1px solid #acc7f5; }
+      .theirs { background: #eef2fb; border: 1px solid #cddcf7; }
+      .composer { display: flex; gap: 8px; margin-top: 8px; }
+      .composer input { flex: 1; padding: 8px; border: 1px solid #9bb1da; }
+      .msg { margin-bottom: 8px; padding: 8px; border: 1px solid #d59a9a; background: #ffe7e7; color: #901f1f; display: none; }
+      @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="bar">
+        <button class="btn" id="homeBtn" type="button">Dashboard</button>
+        <button class="btn" id="friendsBtn" type="button">Friends</button>
+      </div>
+
+      <div id="errorMsg" class="msg"></div>
+
+      <div class="layout">
+        <section class="panel">
+          <h3>Conversations</h3>
+          <div id="conversationList"></div>
+        </section>
+
+        <section class="panel">
+          <h3 id="chatTitle">Select a friend</h3>
+          <div id="messageList" class="messages"></div>
+          <div class="composer">
+            <input id="messageInput" maxlength="600" placeholder="Type a message..." />
+            <button class="btn" id="sendBtn" type="button">Send</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      let socket;
+      let currentUser = null;
+      let activeConversation = '';
+      let conversations = [];
+
+      function showError(message) {
+        const box = document.getElementById('errorMsg');
+        box.textContent = message;
+        box.style.display = 'block';
+      }
+
+      function clearError() {
+        document.getElementById('errorMsg').style.display = 'none';
+      }
+
+      function getQueryUsername() {
+        return new URLSearchParams(window.location.search).get('username') || '';
+      }
+
+      async function fetchJSON(url, options = {}) {
+        const response = await fetch(url, options);
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          window.location.href = '/';
+          return null;
+        }
+        if (!response.ok) {
+          throw new Error(data.error || 'Request failed.');
+        }
+        return data;
+      }
+
+      function appendMessage(message) {
+        const list = document.getElementById('messageList');
+        const row = document.createElement('div');
+        row.className = `message ${message.fromUsername === currentUser.username ? 'mine' : 'theirs'}`;
+        row.innerHTML = `
+          <div>${message.text}</div>
+          <div class="muted">${message.fromUsername} • ${new Date(message.createdAt).toLocaleTimeString()}</div>
+        `;
+        list.appendChild(row);
+        list.scrollTop = list.scrollHeight;
+      }
+
+      function renderConversationList() {
+        const list = document.getElementById('conversationList');
+        list.innerHTML = '';
+
+        if (!conversations.length) {
+          list.innerHTML = '<div class="muted">No friends yet. Add friends first.</div>';
+          return;
+        }
+
+        conversations.forEach((conversation) => {
+          const row = document.createElement('div');
+          row.className = `user-item ${conversation.username === activeConversation ? 'active' : ''}`;
+          row.innerHTML = `
+            <div><strong>${conversation.username}</strong></div>
+            <div class="muted">${conversation.lastMessageText || 'No messages yet.'}</div>
+          `;
+          row.onclick = () => openConversation(conversation.username);
+          list.appendChild(row);
+        });
+      }
+
+      async function loadConversations() {
+        const data = await fetchJSON('/api/chat/conversations');
+        if (!data) return;
+
+        conversations = data.conversations;
+        renderConversationList();
+
+        const preselect = getQueryUsername();
+        if (preselect && conversations.some((item) => item.username.toLowerCase() === preselect.toLowerCase())) {
+          await openConversation(preselect);
+          return;
+        }
+
+        if (!activeConversation && conversations.length) {
+          await openConversation(conversations[0].username);
+        }
+      }
+
+      async function openConversation(username) {
+        activeConversation = username;
+        renderConversationList();
+        document.getElementById('chatTitle').textContent = `Chat with ${username}`;
+        document.getElementById('messageList').innerHTML = '';
+
+        const history = await fetchJSON(`/api/chat/history/${encodeURIComponent(username)}`);
+        if (!history) return;
+
+        history.messages.forEach((message) => appendMessage(message));
+      }
+
+      async function loadCurrentUser() {
+        const data = await fetchJSON('/api/me');
+        if (!data) return;
+        currentUser = data.user;
+      }
+
+      function setupSocket() {
+        socket = io();
+
+        socket.on('connect_error', () => {
+          showError('Could not connect to chat server.');
+        });
+
+        socket.on('chat:message', (message) => {
+          const related =
+            message.fromUsername.toLowerCase() === activeConversation.toLowerCase() ||
+            message.toUsername.toLowerCase() === activeConversation.toLowerCase();
+
+          if (related) {
+            appendMessage(message);
+          }
+
+          const conversation = conversations.find(
+            (item) => item.username.toLowerCase() === message.fromUsername.toLowerCase() || item.username.toLowerCase() === message.toUsername.toLowerCase()
+          );
+          if (conversation) {
+            conversation.lastMessageText = message.text;
+            conversation.lastMessageAt = message.createdAt;
+            renderConversationList();
+          }
+        });
+      }
+
+      document.getElementById('sendBtn').addEventListener('click', () => {
+        clearError();
+        const text = document.getElementById('messageInput').value.trim();
+        if (!activeConversation || !text) {
+          return;
+        }
+
+        socket.emit('chat:send', { toUsername: activeConversation, text }, (response) => {
+          if (!response || !response.ok) {
+            showError(response?.error || 'Failed to send message.');
+            return;
+          }
+
+          document.getElementById('messageInput').value = '';
+        });
+      });
+
+      document.getElementById('messageInput').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          document.getElementById('sendBtn').click();
+        }
+      });
+
+      document.getElementById('homeBtn').addEventListener('click', () => (window.location.href = '/dashboard.html'));
+      document.getElementById('friendsBtn').addEventListener('click', () => (window.location.href = '/friends.html'));
+
+      (async function init() {
+        try {
+          await loadCurrentUser();
+          setupSocket();
+          await loadConversations();
+        } catch (error) {
+          showError(error.message);
+        }
+      })();
+    </script>
+  </body>
+</html>
