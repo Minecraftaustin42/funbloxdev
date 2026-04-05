@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PlaySculpt Groups</title>
+    <style>
+      body { margin: 0; font-family: Verdana, sans-serif; background: #d7e4fb; color: #1f2d46; }
+      .wrap { max-width: 1150px; margin: 0 auto; padding: 16px; }
+      .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+      .btn { border: 1px solid #2e5cb0; background: linear-gradient(#75a0ef, #4f7fd9); color: #fff; padding: 8px 12px; cursor: pointer; border-radius: 3px; }
+      .grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: 12px; }
+      .card { background: #f8fbff; border: 1px solid #97add7; border-radius: 4px; padding: 12px; }
+      input, textarea, select { width: 100%; box-sizing: border-box; margin-top: 4px; margin-bottom: 10px; border: 1px solid #9db2dc; border-radius: 3px; padding: 8px; }
+      .group-row { border: 1px solid #d8e4fa; background: #fff; padding: 10px; border-radius: 4px; margin-bottom: 8px; }
+      .muted { color: #4f5f7e; font-size: 13px; }
+      .members { max-height: 280px; overflow: auto; }
+      .error { color: #8f1f1f; }
+      .role-grid { display: grid; grid-template-columns: repeat(2, minmax(140px, 1fr)); gap: 6px; }
+      @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <h2 style="margin: 0">Groups</h2>
+        <div>
+          <button class="btn" id="refreshBtn" type="button">Refresh</button>
+          <button class="btn" id="dashboardBtn" type="button">Dashboard</button>
+        </div>
+      </div>
+
+      <div id="errorBox" class="error"></div>
+      <div id="statusBox" class="muted" style="margin-bottom: 10px"></div>
+
+      <div class="grid">
+        <section class="card">
+          <h3 style="margin-top: 0">Create Group (100 Sculpt coins)</h3>
+          <label>Name<input id="createName" maxlength="50" /></label>
+          <label>Description<textarea id="createDescription" maxlength="500"></textarea></label>
+          <button class="btn" id="createBtn" type="button">Create Group</button>
+
+          <h3>All Groups</h3>
+          <div id="groupsList"></div>
+        </section>
+
+        <section class="card">
+          <h3 style="margin-top: 0">Group Page</h3>
+          <div id="groupPage" class="muted">Select a group to view its page.</div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      let groupsCache = [];
+      let selectedGroupId = '';
+
+      function setStatus(message) {
+        document.getElementById('statusBox').textContent = message || '';
+      }
+
+      function setError(message) {
+        document.getElementById('errorBox').textContent = message || '';
+      }
+
+      async function fetchJSON(url, options = {}) {
+        const response = await fetch(url, options);
+        const data = await response.json().catch(() => ({}));
+
+        if (response.status === 401) {
+          window.location.href = '/';
+          return null;
+        }
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Request failed.');
+        }
+
+        return data;
+      }
+
+      function formatDate(value) {
+        if (!value) return '-';
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
+      }
+
+      function splitCsv(text) {
+        if (typeof text !== 'string') return [];
+        return text.split(',').map((item) => item.trim()).filter(Boolean);
+      }
+
+      function renderGroups() {
+        const root = document.getElementById('groupsList');
+        root.innerHTML = '';
+
+        if (!Array.isArray(groupsCache) || groupsCache.length === 0) {
+          root.innerHTML = '<div class="muted">No groups</div>';
+          document.getElementById('groupPage').innerHTML = '<div class="muted">No groups</div>';
+          return;
+        }
+
+        groupsCache.forEach((group) => {
+          const row = document.createElement('div');
+          row.className = 'group-row';
+          row.innerHTML = `
+            <div><strong>${group.name || 'Untitled Group'}</strong></div>
+            <div class="muted">Owner: ${group.ownerUsername || 'Unknown'} • Members: ${group.memberCount ?? 0}</div>
+            <div class="muted">${group.description || 'No description.'}</div>
+            <div style="margin-top: 8px">
+              <button class="btn" type="button" data-view="${group.id}">View</button>
+              ${group.joined ? '' : `<button class="btn" type="button" data-join="${group.id}">Join</button>`}
+            </div>
+          `;
+          root.appendChild(row);
+        });
+
+        root.querySelectorAll('[data-view]').forEach((button) => {
+          button.addEventListener('click', () => loadGroupDetail(button.dataset.view || ''));
+        });
+
+        root.querySelectorAll('[data-join]').forEach((button) => {
+          button.addEventListener('click', async () => {
+            try {
+              setError('');
+              const groupId = button.dataset.join || '';
+              await fetchJSON('/groups/join', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ groupId }),
+              });
+              setStatus('Joined group.');
+              await loadGroups();
+              await loadGroupDetail(groupId);
+            } catch (error) {
+              setError(error.message);
+            }
+          });
+        });
+      }
+
+      function renderGroupPage(group) {
+        const root = document.getElementById('groupPage');
+        if (!group || typeof group !== 'object') {
+          root.innerHTML = '<div class="muted">Group not found.</div>';
+          return;
+        }
+
+        const canManageRoles = Boolean(group.viewerRole && group.viewerRole.permissions && group.viewerRole.permissions.manageRoles);
+        const canManageMembers = Boolean(group.viewerRole && group.viewerRole.permissions && group.viewerRole.permissions.manageMembers);
+        const canUpdate = Boolean(group.viewerRole && group.viewerRole.permissions && (
+          group.viewerRole.permissions.manageDescription ||
+          group.viewerRole.permissions.manageAnnouncement ||
+          group.viewerRole.permissions.manageAffiliates ||
+          group.viewerRole.permissions.manageEnemies ||
+          group.viewerRole.permissions.renameGroup
+        ));
+
+        const roles = Array.isArray(group.roles) ? group.roles : [];
+        const members = Array.isArray(group.memberList) ? group.memberList : [];
+
+        root.innerHTML = `
+          <div><strong>${group.name || 'Untitled Group'}</strong></div>
+          <div class="muted">Owner: ${group.ownerUsername || 'Unknown'} • Created: ${formatDate(group.createdAt)}</div>
+          <p>${group.description || 'No description.'}</p>
+          <p><strong>Announcement:</strong> ${group.announcement || 'No announcement.'}</p>
+          <p><strong>Affiliates:</strong> ${(group.affiliates || []).join(', ') || 'None'}</p>
+          <p><strong>Enemies:</strong> ${(group.enemies || []).join(', ') || 'None'}</p>
+
+          <h4>Roles</h4>
+          <div class="members">${roles.map((role) => `<div class="group-row"><strong>${role.name}</strong> (id: ${role.id}, rank: ${role.rankId})<div class="muted">${Object.entries(role.permissions || {}).filter((entry) => entry[1]).map((entry) => entry[0]).join(', ') || 'No permissions'}</div></div>`).join('') || '<div class="muted">No roles.</div>'}</div>
+
+          <h4>Member List</h4>
+          <div class="members">${members.map((member) => `<div class="group-row"><strong>${member.username || 'Unknown'}</strong><div class="muted">${member.roleName || 'Member'} • rank ${member.rankId ?? 1}</div></div>`).join('') || '<div class="muted">No members.</div>'}</div>
+
+          ${canUpdate ? `
+            <h4>Group Settings</h4>
+            <label>Rename Group (costs 100 Sculpt coins)<input id="renameInput" maxlength="50" value="${group.name || ''}" /></label>
+            <label>Description<textarea id="descriptionInput" maxlength="500">${group.description || ''}</textarea></label>
+            <label>Announcement<textarea id="announcementInput" maxlength="300">${group.announcement || ''}</textarea></label>
+            <label>Affiliates (comma separated)<input id="affiliatesInput" value="${(group.affiliates || []).join(', ')}" /></label>
+            <label>Enemies (comma separated)<input id="enemiesInput" value="${(group.enemies || []).join(', ')}" /></label>
+            <button class="btn" type="button" id="saveSettingsBtn">Save Settings</button>
+          ` : '<p class="muted">You do not have permission to edit group settings.</p>'}
+
+          ${canManageRoles ? `
+            <h4>Create Custom Role</h4>
+            <label>Role Id<input id="roleIdInput" maxlength="30" placeholder="builder" /></label>
+            <label>Role Name<input id="roleNameInput" maxlength="30" placeholder="Builder" /></label>
+            <label>Rank Id (0-255)<input id="roleRankInput" type="number" min="0" max="255" value="10" /></label>
+            <div class="role-grid" id="permissionGrid"></div>
+            <button class="btn" type="button" id="createRoleBtn">Create Role</button>
+          ` : ''}
+
+          ${canManageMembers ? `
+            <h4>Assign Member Role</h4>
+            <label>Member<select id="memberSelect">${members.map((member) => `<option value="${member.userId}">${member.username}</option>`).join('')}</select></label>
+            <label>Role<select id="roleSelect">${roles.map((role) => `<option value="${role.id}">${role.name}</option>`).join('')}</select></label>
+            <button class="btn" type="button" id="assignRoleBtn">Assign Role</button>
+          ` : ''}
+        `;
+
+        const permissionKeys = [
+          'manageGroup','manageDescription','manageAnnouncement','manageAffiliates','manageEnemies','manageRoles','manageMembers','renameGroup','viewWall','postWall','viewMembers','inviteMembers'
+        ];
+
+        const permissionGrid = document.getElementById('permissionGrid');
+        if (permissionGrid) {
+          permissionGrid.innerHTML = permissionKeys
+            .map((key) => `<label><input type="checkbox" data-permission="${key}" /> ${key}</label>`)
+            .join('');
+        }
+
+        const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+        if (saveSettingsBtn) {
+          saveSettingsBtn.addEventListener('click', async () => {
+            try {
+              setError('');
+              const payload = {
+                name: document.getElementById('renameInput')?.value || '',
+                description: document.getElementById('descriptionInput')?.value || '',
+                announcement: document.getElementById('announcementInput')?.value || '',
+                affiliates: splitCsv(document.getElementById('affiliatesInput')?.value || ''),
+                enemies: splitCsv(document.getElementById('enemiesInput')?.value || ''),
+              };
+
+              await fetchJSON(`/groups/${encodeURIComponent(group.id)}/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+              });
+
+              setStatus('Group settings saved.');
+              await loadGroups();
+              await loadGroupDetail(group.id);
+            } catch (error) {
+              setError(error.message);
+            }
+          });
+        }
+
+        const createRoleBtn = document.getElementById('createRoleBtn');
+        if (createRoleBtn) {
+          createRoleBtn.addEventListener('click', async () => {
+            try {
+              setError('');
+              const permissions = {};
+              document.querySelectorAll('[data-permission]').forEach((box) => {
+                permissions[box.dataset.permission] = Boolean(box.checked);
+              });
+
+              await fetchJSON(`/groups/${encodeURIComponent(group.id)}/roles/create`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  roleId: document.getElementById('roleIdInput')?.value || '',
+                  name: document.getElementById('roleNameInput')?.value || '',
+                  rankId: Number(document.getElementById('roleRankInput')?.value || 0),
+                  permissions,
+                }),
+              });
+
+              setStatus('Role created.');
+              await loadGroupDetail(group.id);
+            } catch (error) {
+              setError(error.message);
+            }
+          });
+        }
+
+        const assignRoleBtn = document.getElementById('assignRoleBtn');
+        if (assignRoleBtn) {
+          assignRoleBtn.addEventListener('click', async () => {
+            try {
+              setError('');
+              await fetchJSON(`/groups/${encodeURIComponent(group.id)}/members/role`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  memberUserId: document.getElementById('memberSelect')?.value || '',
+                  roleId: document.getElementById('roleSelect')?.value || '',
+                }),
+              });
+              setStatus('Member role updated.');
+              await loadGroupDetail(group.id);
+            } catch (error) {
+              setError(error.message);
+            }
+          });
+        }
+      }
+
+      async function loadGroups() {
+        const data = await fetchJSON('/groups');
+        if (!data) return;
+        groupsCache = Array.isArray(data.groups) ? data.groups : [];
+        renderGroups();
+      }
+
+      async function loadGroupDetail(groupId) {
+        if (!groupId) return;
+        const data = await fetchJSON(`/groups/${encodeURIComponent(groupId)}`);
+        if (!data || !data.group) return;
+        selectedGroupId = groupId;
+        renderGroupPage(data.group);
+      }
+
+      async function createGroup() {
+        try {
+          setError('');
+          const payload = {
+            name: document.getElementById('createName').value || '',
+            description: document.getElementById('createDescription').value || '',
+          };
+
+          const result = await fetchJSON('/groups/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          setStatus(result?.message || 'Group created.');
+          document.getElementById('createName').value = '';
+          document.getElementById('createDescription').value = '';
+          await loadGroups();
+          if (result && result.group && result.group.id) {
+            await loadGroupDetail(result.group.id);
+          }
+        } catch (error) {
+          setError(error.message);
+        }
+      }
+
+      document.getElementById('createBtn').addEventListener('click', createGroup);
+      document.getElementById('refreshBtn').addEventListener('click', async () => {
+        setError('');
+        await loadGroups().catch((error) => setError(error.message));
+        if (selectedGroupId) {
+          await loadGroupDetail(selectedGroupId).catch((error) => setError(error.message));
+        }
+      });
+      document.getElementById('dashboardBtn').addEventListener('click', () => {
+        window.location.href = '/dashboard.html';
+      });
+
+      loadGroups().catch((error) => setError(error.message));
+    </script>
+  </body>
+</html>
