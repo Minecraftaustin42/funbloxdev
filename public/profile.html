@@ -86,6 +86,7 @@
       <div class="bar">
         <button class="btn" id="homeBtn" type="button">Dashboard</button>
         <button class="btn" id="editBtn" type="button" style="display: none">Edit Profile</button>
+        <button class="btn" id="avatarBtn" type="button" style="display: none">Edit Avatar</button>
       </div>
 
       <div id="message" class="muted">Loading profile...</div>
@@ -114,6 +115,7 @@
       const message = document.getElementById('message');
       const profileCard = document.getElementById('profileCard');
       const editBtn = document.getElementById('editBtn');
+      const avatarBtn = document.getElementById('avatarBtn');
 
       function getUsernameFromQuery() {
         const params = new URLSearchParams(window.location.search);
@@ -148,8 +150,12 @@
 
         if (profile.canEdit) {
           editBtn.style.display = 'inline-block';
+          avatarBtn.style.display = 'inline-block';
           editBtn.addEventListener('click', () => {
             window.location.href = '/edit-profile.html';
+          });
+          avatarBtn.addEventListener('click', () => {
+            window.location.href = '/avatar.html';
           });
         }
 
