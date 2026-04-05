@@ -9,6 +9,7 @@ const PORT = process.env.PORT || 3000;
 const USERS_FILE = path.join(__dirname, 'users.json');
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 app.use(
   session({
@@ -24,6 +25,9 @@ app.use(
     },
   })
 );
+
+// serve frontend files
+app.use(express.static(path.join(__dirname, 'public')));
 
 async function ensureUsersFile() {
   try {
