@@ -12,9 +12,29 @@ const PORT = process.env.PORT || 3000;
 const USERS_FILE = path.join(__dirname, 'users.json');
 const NOTIFICATIONS_FILE = path.join(__dirname, 'notifications.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
+const GROUPS_FILE = path.join(__dirname, 'groups.json');
+const GAMES_FILE = path.join(__dirname, 'games.json');
 
 const MAX_MESSAGE_LENGTH = 600;
 const MAX_BIO_LENGTH = 280;
+const GROUP_CREATION_COST = 100;
+const GROUP_RENAME_COST = 100;
+const MAX_GROUP_ROLES = 100;
+
+const GROUP_PERMISSION_KEYS = [
+  'manageGroup',
+  'manageDescription',
+  'manageAnnouncement',
+  'manageAffiliates',
+  'manageEnemies',
+  'manageRoles',
+  'manageMembers',
+  'renameGroup',
+  'viewWall',
+  'postWall',
+  'viewMembers',
+  'inviteMembers',
+];
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -80,7 +100,7 @@ function ensureUserShape(user) {
       friendRequests: [],
       sentFriendRequests: [],
       notifications: [],
-      avatar: {},
+      avatar: sanitizeAvatar({}),
       createdAt: new Date().toISOString(),
       lastDailyRewardAt: null,
       profile: {
@@ -100,7 +120,7 @@ function ensureUserShape(user) {
   user.friendRequests = uniqueStringArray(user.friendRequests);
   user.sentFriendRequests = uniqueStringArray(user.sentFriendRequests);
   user.notifications = Array.isArray(user.notifications) ? user.notifications : [];
-  user.avatar = user.avatar && typeof user.avatar === 'object' ? user.avatar : {};
+  user.avatar = sanitizeAvatar(user.avatar);
 
   if (!user.profile || typeof user.profile !== 'object') {
     user.profile = {};
@@ -145,6 +165,302 @@ async function readMessages() {
 
 async function writeMessages(messages) {
   await writeArrayFile(MESSAGES_FILE, messages);
+}
+
+async function readGroups() {
+  return readArrayFile(GROUPS_FILE);
+}
+
+async function writeGroups(groups) {
+  await writeArrayFile(GROUPS_FILE, groups);
+}
+
+async function readGames() {
+  return readArrayFile(GAMES_FILE);
+}
+
+async function writeGames(games) {
+  await writeArrayFile(GAMES_FILE, games);
+}
+
+function normalizeHexColor(value, fallback) {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const clean = value.trim();
+  if (!/^#[0-9A-Fa-f]{6}$/.test(clean)) {
+    return fallback;
+  }
+
+  return clean.toLowerCase();
+}
+
+function buildAvatarImageUrl(avatar) {
+  const safeAvatar = avatar && typeof avatar === 'object' ? avatar : {};
+  const skinColor = normalizeHexColor(safeAvatar.skinColor, '#f1c27d');
+  const shirtColor = normalizeHexColor(safeAvatar.shirt, '#4f7fd9');
+  const pantsColor = normalizeHexColor(safeAvatar.pants, '#2f4f8e');
+  const hatColor = normalizeHexColor(safeAvatar.hat, '#303030');
+
+  const faceType = typeof safeAvatar.face === 'string' ? safeAvatar.face : 'smile';
+  const hatType = typeof safeAvatar.hatType === 'string' ? safeAvatar.hatType : 'none';
+
+  const eyeY = 44;
+  const mouth =
+    faceType === 'serious'
+      ? '<line x1="48" y1="58" x2="80" y2="58" stroke="#222" stroke-width="3" />'
+      : faceType === 'wink'
+        ? '<path d="M47 58 Q65 71 81 57" stroke="#222" stroke-width="3" fill="none" />'
+        : '<path d="M47 56 Q64 72 81 56" stroke="#222" stroke-width="3" fill="none" />';
+
+  const eyes =
+    faceType === 'wink'
+      ? `<circle cx="50" cy="${eyeY}" r="3" fill="#222" /><line x1="73" y1="${eyeY}" x2="82" y2="${eyeY}" stroke="#222" stroke-width="3" />`
+      : `<circle cx="50" cy="${eyeY}" r="3" fill="#222" /><circle cx="78" cy="${eyeY}" r="3" fill="#222" />`;
+
+  const hat =
+    hatType === 'cap'
+      ? `<rect x="34" y="20" width="60" height="10" rx="5" fill="${hatColor}" /><rect x="58" y="30" width="40" height="7" rx="3" fill="${hatColor}" />`
+      : hatType === 'crown'
+        ? `<path d="M34 30 L42 14 L54 30 L64 14 L74 30 L86 14 L94 30 Z" fill="${hatColor}" />`
+        : '';
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+      <rect width="128" height="128" fill="#dfe9ff" />
+      ${hat}
+      <circle cx="64" cy="50" r="24" fill="${skinColor}" />
+      ${eyes}
+      ${mouth}
+      <rect x="38" y="76" width="52" height="26" rx="4" fill="${shirtColor}" />
+      <rect x="38" y="102" width="24" height="20" fill="${pantsColor}" />
+      <rect x="66" y="102" width="24" height="20" fill="${pantsColor}" />
+    </svg>
+  `;
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function sanitizeAvatar(avatar) {
+  const source = avatar && typeof avatar === 'object' ? avatar : {};
+  const safe = {
+    skinColor: normalizeHexColor(source.skinColor, '#f1c27d'),
+    shirt: normalizeHexColor(source.shirt, '#4f7fd9'),
+    pants: normalizeHexColor(source.pants, '#2f4f8e'),
+    face: ['smile', 'serious', 'wink'].includes(source.face) ? source.face : 'smile',
+    hatType: ['none', 'cap', 'crown'].includes(source.hatType) ? source.hatType : 'none',
+    hat: normalizeHexColor(source.hat, '#303030'),
+  };
+
+  safe.imageUrl = buildAvatarImageUrl(safe);
+  return safe;
+}
+
+function sanitizePermissionShape(permissions) {
+  const safePermissions = {};
+
+  for (const key of GROUP_PERMISSION_KEYS) {
+    safePermissions[key] = Boolean(permissions && permissions[key]);
+  }
+
+  return safePermissions;
+}
+
+function createRole({ id, name, rankId, permissions }) {
+  return {
+    id,
+    name,
+    rankId,
+    permissions: sanitizePermissionShape(permissions),
+  };
+}
+
+function getDefaultGroupRoles(ownerUserId) {
+  return [
+    createRole({
+      id: 'owner',
+      name: 'Owner',
+      rankId: 255,
+      permissions: Object.fromEntries(GROUP_PERMISSION_KEYS.map((key) => [key, true])),
+    }),
+    createRole({
+      id: 'admin',
+      name: 'Admin',
+      rankId: 200,
+      permissions: {
+        manageGroup: true,
+        manageDescription: true,
+        manageAnnouncement: true,
+        manageAffiliates: true,
+        manageEnemies: true,
+        manageRoles: true,
+        manageMembers: true,
+        renameGroup: true,
+        viewWall: true,
+        postWall: true,
+        viewMembers: true,
+        inviteMembers: true,
+      },
+    }),
+    createRole({
+      id: 'member',
+      name: 'Member',
+      rankId: 1,
+      permissions: {
+        manageGroup: false,
+        manageDescription: false,
+        manageAnnouncement: false,
+        manageAffiliates: false,
+        manageEnemies: false,
+        manageRoles: false,
+        manageMembers: false,
+        renameGroup: false,
+        viewWall: true,
+        postWall: true,
+        viewMembers: true,
+        inviteMembers: false,
+      },
+    }),
+  ];
+}
+
+function ensureGroupShape(group) {
+  if (!group || typeof group !== 'object') {
+    return null;
+  }
+
+  const safeGroup = {
+    id: typeof group.id === 'string' ? group.id : `group_${Date.now()}`,
+    name: typeof group.name === 'string' ? group.name : 'Untitled Group',
+    description: typeof group.description === 'string' ? group.description : '',
+    ownerUserId: typeof group.ownerUserId === 'string' ? group.ownerUserId : '',
+    announcement: typeof group.announcement === 'string' ? group.announcement : '',
+    affiliates: Array.isArray(group.affiliates) ? uniqueStringArray(group.affiliates) : [],
+    enemies: Array.isArray(group.enemies) ? uniqueStringArray(group.enemies) : [],
+    createdAt: typeof group.createdAt === 'string' ? group.createdAt : new Date().toISOString(),
+    updatedAt: typeof group.updatedAt === 'string' ? group.updatedAt : new Date().toISOString(),
+    roleAssignments:
+      group.roleAssignments && typeof group.roleAssignments === 'object'
+        ? group.roleAssignments
+        : {},
+    joinRequests: Array.isArray(group.joinRequests) ? uniqueStringArray(group.joinRequests) : [],
+  };
+
+  const roles = Array.isArray(group.roles) ? group.roles : [];
+  const fallbackRoles = getDefaultGroupRoles(safeGroup.ownerUserId);
+  safeGroup.roles = roles.length
+    ? roles
+        .filter((role) => role && typeof role === 'object')
+        .map((role, index) =>
+          createRole({
+            id: typeof role.id === 'string' ? role.id : `role_${index + 1}`,
+            name: typeof role.name === 'string' ? role.name : `Role ${index + 1}`,
+            rankId: Number.isFinite(role.rankId) ? role.rankId : index + 1,
+            permissions: role.permissions,
+          })
+        )
+    : fallbackRoles;
+
+  if (!safeGroup.roles.find((role) => role.id === 'owner')) {
+    safeGroup.roles.unshift(fallbackRoles[0]);
+  }
+
+  if (!safeGroup.roles.find((role) => role.id === 'admin')) {
+    safeGroup.roles.push(fallbackRoles[1]);
+  }
+
+  if (!safeGroup.roles.find((role) => role.id === 'member')) {
+    safeGroup.roles.push(fallbackRoles[2]);
+  }
+
+  const memberIds = Array.isArray(group.memberIds) ? uniqueStringArray(group.memberIds) : [];
+
+  if (!memberIds.includes(safeGroup.ownerUserId)) {
+    memberIds.unshift(safeGroup.ownerUserId);
+  }
+
+  safeGroup.memberIds = memberIds.filter(Boolean);
+
+  if (!safeGroup.roleAssignments[safeGroup.ownerUserId]) {
+    safeGroup.roleAssignments[safeGroup.ownerUserId] = 'owner';
+  }
+
+  for (const memberId of safeGroup.memberIds) {
+    if (!safeGroup.roleAssignments[memberId]) {
+      safeGroup.roleAssignments[memberId] = 'member';
+    }
+  }
+
+  return safeGroup;
+}
+
+function getRoleById(group, roleId) {
+  return group.roles.find((role) => role.id === roleId);
+}
+
+function getMemberRole(group, userId) {
+  const roleId = group.roleAssignments?.[userId] || (group.ownerUserId === userId ? 'owner' : 'member');
+  return getRoleById(group, roleId) || getRoleById(group, 'member');
+}
+
+function hasGroupPermission(group, userId, permissionKey) {
+  const role = getMemberRole(group, userId);
+  return Boolean(role?.permissions?.[permissionKey]);
+}
+
+function buildGroupSummary(group, users, viewerUserId = null) {
+  const owner = users.find((user) => user.id === group.ownerUserId);
+  const memberCount = Array.isArray(group.memberIds) ? group.memberIds.length : 0;
+
+  return {
+    id: group.id,
+    name: group.name,
+    description: group.description,
+    ownerUsername: owner ? owner.username : 'Unknown',
+    announcement: group.announcement,
+    affiliates: group.affiliates,
+    enemies: group.enemies,
+    memberCount,
+    createdAt: group.createdAt,
+    updatedAt: group.updatedAt,
+    joined: viewerUserId ? group.memberIds.includes(viewerUserId) : false,
+  };
+}
+
+function buildGroupDetail(group, users, viewerUserId = null) {
+  const summary = buildGroupSummary(group, users, viewerUserId);
+  const members = (group.memberIds || [])
+    .map((memberId) => users.find((user) => user.id === memberId))
+    .filter(Boolean)
+    .map((member) => {
+      const role = getMemberRole(group, member.id);
+      return {
+        userId: member.id,
+        username: member.username,
+        avatar: getAvatarPreview(member.avatar),
+        roleId: role?.id || 'member',
+        roleName: role?.name || 'Member',
+        rankId: role?.rankId ?? 1,
+      };
+    })
+    .sort((a, b) => b.rankId - a.rankId || a.username.localeCompare(b.username));
+
+  const viewerRole = viewerUserId ? getMemberRole(group, viewerUserId) : null;
+
+  return {
+    ...summary,
+    roles: group.roles,
+    memberList: members,
+    viewerRole: viewerRole
+      ? {
+          id: viewerRole.id,
+          name: viewerRole.name,
+          rankId: viewerRole.rankId,
+          permissions: viewerRole.permissions,
+        }
+      : null,
+  };
 }
 
 function getAvatarPreview(avatar) {
@@ -311,7 +627,7 @@ app.post('/api/signup', async (req, res) => {
       friendRequests: [],
       sentFriendRequests: [],
       notifications: ['Welcome to PlaySculpt! Start building your first world.'],
-      avatar: {},
+      avatar: sanitizeAvatar({}),
       createdAt: now,
       lastDailyRewardAt: null,
       profile: {
@@ -409,6 +725,210 @@ app.get('/api/me', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Me route error:', error);
     return res.status(500).json({ error: 'Server error while fetching user.' });
+  }
+});
+
+app.get('/api/avatar/me', requireAuth, async (req, res) => {
+  try {
+    const users = await readUsers();
+    const user = users.find((item) => item.id === req.session.userId);
+
+    if (!user) {
+      return res.status(401).json({ error: 'Session invalid.' });
+    }
+
+    return res.json({ avatar: sanitizeAvatar(user.avatar) });
+  } catch (error) {
+    console.error('Avatar fetch error:', error);
+    return res.status(500).json({ error: 'Server error while loading avatar.' });
+  }
+});
+
+app.post('/api/avatar/update', requireAuth, async (req, res) => {
+  try {
+    const { username, avatar } = req.body || {};
+
+    const usernameError = validateUsername(username);
+    if (usernameError) {
+      return res.status(400).json({ error: usernameError });
+    }
+
+    const users = await readUsers();
+    const currentUser = users.find((item) => item.id === req.session.userId);
+
+    if (!currentUser) {
+      return res.status(401).json({ error: 'Session invalid.' });
+    }
+
+    if (currentUser.username.toLowerCase() !== username.trim().toLowerCase()) {
+      return res.status(403).json({ error: 'Only the profile owner can edit avatar.' });
+    }
+
+    currentUser.avatar = sanitizeAvatar(avatar);
+    await writeUsers(users);
+
+    return res.json({
+      message: 'Avatar updated successfully.',
+      avatar: currentUser.avatar,
+      user: toPublicUser(currentUser),
+    });
+  } catch (error) {
+    console.error('Avatar update error:', error);
+    return res.status(500).json({ error: 'Server error while saving avatar.' });
+  }
+});
+
+app.post('/api/games/create', requireAuth, async (req, res) => {
+  try {
+    const { title, description, thumbnail, isPublic, studioState } = req.body || {};
+
+    if (typeof title !== 'string' || !title.trim()) {
+      return res.status(400).json({ error: 'Game title is required.' });
+    }
+
+    const cleanTitle = title.trim();
+    if (cleanTitle.length < 3 || cleanTitle.length > 80) {
+      return res.status(400).json({ error: 'Game title must be 3 to 80 characters.' });
+    }
+
+    const cleanDescription = typeof description === 'string' ? description.trim() : '';
+    if (cleanDescription.length > 1000) {
+      return res.status(400).json({ error: 'Description must be 1000 characters or fewer.' });
+    }
+
+    const users = await readUsers();
+    const games = await readGames();
+    const currentUser = users.find((item) => item.id === req.session.userId);
+
+    if (!currentUser) {
+      return res.status(401).json({ error: 'Session invalid.' });
+    }
+
+    const now = new Date().toISOString();
+    const game = {
+      id: `game_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      title: cleanTitle,
+      description: cleanDescription,
+      creator: currentUser.username,
+      creatorUserId: currentUser.id,
+      thumbnail: typeof thumbnail === 'string' && thumbnail.trim() ? thumbnail.trim() : '/assets/default-avatar.svg',
+      visits: 0,
+      public: Boolean(isPublic),
+      studioState: studioState && typeof studioState === 'object' ? studioState : { objects: [] },
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    games.push(game);
+
+    ensureUserShape(currentUser);
+    currentUser.profile.gamesCreated = Number.isFinite(currentUser.profile.gamesCreated)
+      ? currentUser.profile.gamesCreated + 1
+      : 1;
+
+    await writeGames(games);
+    await writeUsers(users);
+
+    return res.status(201).json({ message: 'Game created.', game });
+  } catch (error) {
+    console.error('Game create error:', error);
+    return res.status(500).json({ error: 'Server error while creating game.' });
+  }
+});
+
+app.get('/api/games/my', requireAuth, async (req, res) => {
+  try {
+    const games = await readGames();
+    const ownGames = games
+      .filter((game) => game && game.creatorUserId === req.session.userId)
+      .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+
+    return res.json({ games: ownGames });
+  } catch (error) {
+    console.error('My games error:', error);
+    return res.status(500).json({ error: 'Server error while loading your games.' });
+  }
+});
+
+app.get('/api/games/:id', requireAuth, async (req, res) => {
+  try {
+    const games = await readGames();
+    const game = games.find((item) => item && item.id === req.params.id);
+
+    if (!game) {
+      return res.status(404).json({ error: 'Game not found.' });
+    }
+
+    const isCreator = game.creatorUserId === req.session.userId;
+    if (!game.public && !isCreator) {
+      return res.status(403).json({ error: 'This game is private.' });
+    }
+
+    game.visits = Number.isFinite(game.visits) ? game.visits + 1 : 1;
+    await writeGames(games);
+
+    return res.json({ game, isCreator });
+  } catch (error) {
+    console.error('Game detail error:', error);
+    return res.status(500).json({ error: 'Server error while loading game.' });
+  }
+});
+
+app.post('/api/games/update', requireAuth, async (req, res) => {
+  try {
+    const { id, title, description, thumbnail, isPublic, studioState } = req.body || {};
+
+    if (typeof id !== 'string' || !id.trim()) {
+      return res.status(400).json({ error: 'Game id is required.' });
+    }
+
+    const games = await readGames();
+    const game = games.find((item) => item && item.id === id.trim());
+
+    if (!game) {
+      return res.status(404).json({ error: 'Game not found.' });
+    }
+
+    if (game.creatorUserId !== req.session.userId) {
+      return res.status(403).json({ error: 'Only the creator can edit this game.' });
+    }
+
+    if (typeof title === 'string' && title.trim()) {
+      const cleanTitle = title.trim();
+      if (cleanTitle.length < 3 || cleanTitle.length > 80) {
+        return res.status(400).json({ error: 'Game title must be 3 to 80 characters.' });
+      }
+      game.title = cleanTitle;
+    }
+
+    if (typeof description === 'string') {
+      const cleanDescription = description.trim();
+      if (cleanDescription.length > 1000) {
+        return res.status(400).json({ error: 'Description must be 1000 characters or fewer.' });
+      }
+      game.description = cleanDescription;
+    }
+
+    if (typeof thumbnail === 'string' && thumbnail.trim()) {
+      game.thumbnail = thumbnail.trim();
+    }
+
+    if (typeof isPublic === 'boolean') {
+      game.public = isPublic;
+    }
+
+    if (studioState && typeof studioState === 'object') {
+      game.studioState = studioState;
+    }
+
+    game.updatedAt = new Date().toISOString();
+
+    await writeGames(games);
+
+    return res.json({ message: 'Game updated.', game });
+  } catch (error) {
+    console.error('Game update error:', error);
+    return res.status(500).json({ error: 'Server error while updating game.' });
   }
 });
 
@@ -994,6 +1514,359 @@ app.get('/api/chat/conversations', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Conversations error:', error);
     return res.status(500).json({ error: 'Server error while loading conversations.' });
+  }
+});
+
+
+app.get('/groups', requireAuth, async (req, res) => {
+  try {
+    const users = await readUsers();
+    const groups = (await readGroups()).map((group) => ensureGroupShape(group)).filter(Boolean);
+
+    return res.json({
+      groups: groups
+        .map((group) => buildGroupSummary(group, users, req.session.userId))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    });
+  } catch (error) {
+    console.error('Groups list error:', error);
+    return res.status(500).json({ error: 'Server error while loading groups.' });
+  }
+});
+
+app.post('/groups/create', requireAuth, async (req, res) => {
+  try {
+    const { name, description } = req.body || {};
+
+    if (typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Group name is required.' });
+    }
+
+    const cleanName = name.trim();
+    if (cleanName.length < 3 || cleanName.length > 50) {
+      return res.status(400).json({ error: 'Group name must be 3 to 50 characters.' });
+    }
+
+    const cleanDescription = typeof description === 'string' ? description.trim() : '';
+    if (cleanDescription.length > 500) {
+      return res.status(400).json({ error: 'Group description must be 500 characters or fewer.' });
+    }
+
+    const users = await readUsers();
+    const groups = (await readGroups()).map((group) => ensureGroupShape(group)).filter(Boolean);
+    const currentUser = users.find((user) => user.id === req.session.userId);
+
+    if (!currentUser) {
+      return res.status(401).json({ error: 'Session invalid.' });
+    }
+
+    if (currentUser.sculptCoins < GROUP_CREATION_COST) {
+      return res.status(400).json({
+        error: `You need ${GROUP_CREATION_COST} Sculpt coins to create a group.`,
+      });
+    }
+
+    if (groups.some((group) => group.name.toLowerCase() === cleanName.toLowerCase())) {
+      return res.status(409).json({ error: 'A group with this name already exists.' });
+    }
+
+    currentUser.sculptCoins -= GROUP_CREATION_COST;
+
+    const now = new Date().toISOString();
+    const group = ensureGroupShape({
+      id: `group_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      name: cleanName,
+      description: cleanDescription,
+      ownerUserId: currentUser.id,
+      memberIds: [currentUser.id],
+      announcement: '',
+      affiliates: [],
+      enemies: [],
+      roles: getDefaultGroupRoles(currentUser.id),
+      roleAssignments: {
+        [currentUser.id]: 'owner',
+      },
+      joinRequests: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    groups.push(group);
+
+    await writeUsers(users);
+    await writeGroups(groups);
+
+    return res.status(201).json({
+      message: `Group created for ${GROUP_CREATION_COST} Sculpt coins.`,
+      group: buildGroupDetail(group, users, req.session.userId),
+      user: toPublicUser(currentUser),
+    });
+  } catch (error) {
+    console.error('Group create error:', error);
+    return res.status(500).json({ error: 'Server error while creating group.' });
+  }
+});
+
+app.post('/groups/join', requireAuth, async (req, res) => {
+  try {
+    const { groupId } = req.body || {};
+
+    if (typeof groupId !== 'string' || !groupId.trim()) {
+      return res.status(400).json({ error: 'groupId is required.' });
+    }
+
+    const users = await readUsers();
+    const groups = (await readGroups()).map((group) => ensureGroupShape(group)).filter(Boolean);
+    const currentUser = users.find((user) => user.id === req.session.userId);
+    const targetGroup = groups.find((group) => group.id === groupId.trim());
+
+    if (!currentUser) {
+      return res.status(401).json({ error: 'Session invalid.' });
+    }
+
+    if (!targetGroup) {
+      return res.status(404).json({ error: 'Group not found.' });
+    }
+
+    if (targetGroup.memberIds.includes(currentUser.id)) {
+      return res.status(409).json({ error: 'You are already a member of this group.' });
+    }
+
+    targetGroup.memberIds.push(currentUser.id);
+    targetGroup.roleAssignments[currentUser.id] = 'member';
+    targetGroup.updatedAt = new Date().toISOString();
+
+    await writeGroups(groups);
+
+    return res.json({
+      message: `Joined ${targetGroup.name}.`,
+      group: buildGroupDetail(targetGroup, users, req.session.userId),
+    });
+  } catch (error) {
+    console.error('Group join error:', error);
+    return res.status(500).json({ error: 'Server error while joining group.' });
+  }
+});
+
+app.get('/groups/:id', requireAuth, async (req, res) => {
+  try {
+    const users = await readUsers();
+    const groups = (await readGroups()).map((group) => ensureGroupShape(group)).filter(Boolean);
+    const group = groups.find((item) => item.id === req.params.id);
+
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found.' });
+    }
+
+    return res.json({ group: buildGroupDetail(group, users, req.session.userId) });
+  } catch (error) {
+    console.error('Group detail error:', error);
+    return res.status(500).json({ error: 'Server error while loading group page.' });
+  }
+});
+
+app.post('/groups/:id/update', requireAuth, async (req, res) => {
+  try {
+    const { name, description, announcement, affiliates, enemies } = req.body || {};
+    const users = await readUsers();
+    const groups = (await readGroups()).map((group) => ensureGroupShape(group)).filter(Boolean);
+    const group = groups.find((item) => item.id === req.params.id);
+    const currentUser = users.find((user) => user.id === req.session.userId);
+
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found.' });
+    }
+
+    if (!currentUser || !group.memberIds.includes(currentUser.id)) {
+      return res.status(403).json({ error: 'You must be a group member to edit group settings.' });
+    }
+
+    const isOwner = group.ownerUserId === currentUser.id;
+
+    if (typeof description === 'string') {
+      if (!isOwner && !hasGroupPermission(group, currentUser.id, 'manageDescription')) {
+        return res.status(403).json({ error: 'You do not have permission to edit description.' });
+      }
+
+      if (description.trim().length > 500) {
+        return res.status(400).json({ error: 'Description must be 500 characters or fewer.' });
+      }
+
+      group.description = description.trim();
+    }
+
+    if (typeof announcement === 'string') {
+      if (!isOwner && !hasGroupPermission(group, currentUser.id, 'manageAnnouncement')) {
+        return res.status(403).json({ error: 'You do not have permission to edit announcements.' });
+      }
+
+      if (announcement.trim().length > 300) {
+        return res.status(400).json({ error: 'Announcement must be 300 characters or fewer.' });
+      }
+
+      group.announcement = announcement.trim();
+    }
+
+    if (Array.isArray(affiliates)) {
+      if (!isOwner && !hasGroupPermission(group, currentUser.id, 'manageAffiliates')) {
+        return res.status(403).json({ error: 'You do not have permission to edit affiliates.' });
+      }
+
+      group.affiliates = uniqueStringArray(affiliates).slice(0, 100);
+    }
+
+    if (Array.isArray(enemies)) {
+      if (!isOwner && !hasGroupPermission(group, currentUser.id, 'manageEnemies')) {
+        return res.status(403).json({ error: 'You do not have permission to edit enemies.' });
+      }
+
+      group.enemies = uniqueStringArray(enemies).slice(0, 100);
+    }
+
+    if (typeof name === 'string' && name.trim()) {
+      if (!isOwner && !hasGroupPermission(group, currentUser.id, 'renameGroup')) {
+        return res.status(403).json({ error: 'You do not have permission to rename this group.' });
+      }
+
+      if (currentUser.sculptCoins < GROUP_RENAME_COST) {
+        return res.status(400).json({ error: `Renaming costs ${GROUP_RENAME_COST} Sculpt coins.` });
+      }
+
+      const cleanName = name.trim();
+      if (cleanName.length < 3 || cleanName.length > 50) {
+        return res.status(400).json({ error: 'Group name must be 3 to 50 characters.' });
+      }
+
+      const duplicate = groups.find(
+        (item) => item.id !== group.id && item.name.toLowerCase() === cleanName.toLowerCase()
+      );
+
+      if (duplicate) {
+        return res.status(409).json({ error: 'Another group already uses this name.' });
+      }
+
+      currentUser.sculptCoins -= GROUP_RENAME_COST;
+      group.name = cleanName;
+    }
+
+    group.updatedAt = new Date().toISOString();
+
+    await writeUsers(users);
+    await writeGroups(groups);
+
+    return res.json({
+      message: 'Group updated successfully.',
+      group: buildGroupDetail(group, users, req.session.userId),
+      user: toPublicUser(currentUser),
+    });
+  } catch (error) {
+    console.error('Group update error:', error);
+    return res.status(500).json({ error: 'Server error while updating group.' });
+  }
+});
+
+app.post('/groups/:id/roles/create', requireAuth, async (req, res) => {
+  try {
+    const { roleId, name, rankId, permissions } = req.body || {};
+
+    if (typeof roleId !== 'string' || !roleId.trim()) {
+      return res.status(400).json({ error: 'roleId is required.' });
+    }
+
+    if (typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Role name is required.' });
+    }
+
+    if (!Number.isInteger(rankId) || rankId < 0 || rankId > 255) {
+      return res.status(400).json({ error: 'rankId must be an integer from 0 to 255.' });
+    }
+
+    const users = await readUsers();
+    const groups = (await readGroups()).map((group) => ensureGroupShape(group)).filter(Boolean);
+    const group = groups.find((item) => item.id === req.params.id);
+
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found.' });
+    }
+
+    if (!hasGroupPermission(group, req.session.userId, 'manageRoles')) {
+      return res.status(403).json({ error: 'You do not have permission to manage roles.' });
+    }
+
+    if (group.roles.length >= MAX_GROUP_ROLES) {
+      return res.status(400).json({ error: `Maximum role count is ${MAX_GROUP_ROLES}.` });
+    }
+
+    const cleanRoleId = roleId.trim().toLowerCase();
+    if (group.roles.some((role) => role.id === cleanRoleId)) {
+      return res.status(409).json({ error: 'Role id already exists.' });
+    }
+
+    group.roles.push(
+      createRole({
+        id: cleanRoleId,
+        name: name.trim(),
+        rankId,
+        permissions,
+      })
+    );
+
+    group.updatedAt = new Date().toISOString();
+    await writeGroups(groups);
+
+    return res.status(201).json({ group: buildGroupDetail(group, users, req.session.userId) });
+  } catch (error) {
+    console.error('Group role create error:', error);
+    return res.status(500).json({ error: 'Server error while creating group role.' });
+  }
+});
+
+app.post('/groups/:id/members/role', requireAuth, async (req, res) => {
+  try {
+    const { memberUserId, roleId } = req.body || {};
+
+    if (typeof memberUserId !== 'string' || !memberUserId.trim()) {
+      return res.status(400).json({ error: 'memberUserId is required.' });
+    }
+
+    if (typeof roleId !== 'string' || !roleId.trim()) {
+      return res.status(400).json({ error: 'roleId is required.' });
+    }
+
+    const users = await readUsers();
+    const groups = (await readGroups()).map((group) => ensureGroupShape(group)).filter(Boolean);
+    const group = groups.find((item) => item.id === req.params.id);
+
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found.' });
+    }
+
+    if (!hasGroupPermission(group, req.session.userId, 'manageMembers')) {
+      return res.status(403).json({ error: 'You do not have permission to manage members.' });
+    }
+
+    if (!group.memberIds.includes(memberUserId)) {
+      return res.status(404).json({ error: 'Member not found in this group.' });
+    }
+
+    if (memberUserId === group.ownerUserId) {
+      return res.status(400).json({ error: 'Owner role cannot be changed.' });
+    }
+
+    const role = getRoleById(group, roleId.trim());
+    if (!role) {
+      return res.status(404).json({ error: 'Role not found.' });
+    }
+
+    group.roleAssignments[memberUserId] = role.id;
+    group.updatedAt = new Date().toISOString();
+
+    await writeGroups(groups);
+
+    return res.json({ group: buildGroupDetail(group, users, req.session.userId) });
+  } catch (error) {
+    console.error('Group member role error:', error);
+    return res.status(500).json({ error: 'Server error while updating member role.' });
   }
 });
 
