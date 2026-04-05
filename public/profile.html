@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PlaySculpt Profile</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Verdana, Arial, sans-serif;
+        background: #e6eefc;
+        color: #1d2e4e;
+      }
+
+      .wrap {
+        max-width: 860px;
+        margin: 22px auto;
+        padding: 0 12px;
+      }
+
+      .bar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .btn {
+        border: 1px solid #2f5eb5;
+        background: linear-gradient(#75a0ef, #4f7fd9);
+        color: #fff;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      .profile-card {
+        border: 1px solid #95acd8;
+        background: #fff;
+        border-top: 6px solid #4f7fd9;
+        padding: 14px;
+      }
+
+      .head {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .avatar {
+        width: 96px;
+        height: 96px;
+        border: 1px solid #7c95c9;
+        border-radius: 6px;
+        object-fit: cover;
+      }
+
+      .grid {
+        margin-top: 14px;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(2, minmax(180px, 1fr));
+      }
+
+      .tile {
+        border: 1px solid #d4e0f6;
+        background: #f8fbff;
+        padding: 10px;
+      }
+
+      .bio {
+        margin-top: 12px;
+        border: 1px solid #d4e0f6;
+        background: #fbfdff;
+        padding: 12px;
+        min-height: 70px;
+        white-space: pre-wrap;
+      }
+
+      .muted {
+        color: #4d5f82;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="bar">
+        <button class="btn" id="homeBtn" type="button">Dashboard</button>
+        <button class="btn" id="editBtn" type="button" style="display: none">Edit Profile</button>
+      </div>
+
+      <div id="message" class="muted">Loading profile...</div>
+
+      <div class="profile-card" id="profileCard" style="display: none">
+        <div class="head">
+          <img id="avatar" class="avatar" src="/assets/default-avatar.svg" alt="Avatar" />
+          <div>
+            <h1 id="username"></h1>
+            <div id="status" class="muted"></div>
+            <div class="muted">Joined <span id="joinDate"></span></div>
+          </div>
+        </div>
+
+        <div class="grid">
+          <div class="tile">Friends: <strong id="friendsCount">0</strong></div>
+          <div class="tile">Games Created: <strong id="gamesCreated">0</strong></div>
+        </div>
+
+        <h3>Bio</h3>
+        <div id="bio" class="bio"></div>
+      </div>
+    </div>
+
+    <script>
+      const message = document.getElementById('message');
+      const profileCard = document.getElementById('profileCard');
+      const editBtn = document.getElementById('editBtn');
+
+      function getUsernameFromQuery() {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('username') || '';
+      }
+
+      async function loadProfile() {
+        const username = getUsernameFromQuery();
+        if (!username) {
+          message.textContent = 'Missing username in query string.';
+          return;
+        }
+
+        const response = await fetch(`/api/profile/${encodeURIComponent(username)}`);
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          message.textContent = data.error || 'Could not load profile.';
+          return;
+        }
+
+        const { profile } = data;
+
+        profileCard.style.borderTopColor = profile.themeColor || '#4f7fd9';
+        document.getElementById('username').textContent = profile.username;
+        document.getElementById('status').textContent = profile.status || 'No status set.';
+        document.getElementById('joinDate').textContent = new Date(profile.joinDate).toLocaleDateString();
+        document.getElementById('avatar').src = profile.avatar || '/assets/default-avatar.svg';
+        document.getElementById('friendsCount').textContent = profile.friendsCount;
+        document.getElementById('gamesCreated').textContent = profile.gamesCreated;
+        document.getElementById('bio').textContent = profile.bio || 'This user has not written a bio yet.';
+
+        if (profile.canEdit) {
+          editBtn.style.display = 'inline-block';
+          editBtn.addEventListener('click', () => {
+            window.location.href = '/edit-profile.html';
+          });
+        }
+
+        message.style.display = 'none';
+        profileCard.style.display = 'block';
+      }
+
+      document.getElementById('homeBtn').addEventListener('click', () => {
+        window.location.href = '/dashboard.html';
+      });
+
+      loadProfile().catch(() => {
+        message.textContent = 'Unexpected error while loading profile.';
+      });
+    </script>
+  </body>
+</html>

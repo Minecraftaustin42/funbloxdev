@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PlaySculpt Friends</title>
+    <style>
+      body { margin: 0; font-family: Verdana, Arial, sans-serif; background: #e7eefc; color: #1e2e4a; }
+      .wrap { max-width: 1000px; margin: 20px auto; padding: 0 12px; }
+      .bar { display: flex; gap: 8px; margin-bottom: 12px; }
+      .btn { border: 1px solid #2e5cb0; background: linear-gradient(#75a0ef, #4f7fd9); color: #fff; padding: 8px 12px; cursor: pointer; }
+      .msg { display: none; padding: 10px; border: 1px solid; margin-bottom: 10px; }
+      .ok { background: #e8f9eb; border-color: #98c39c; color: #1e6e2b; }
+      .err { background: #ffe7e7; border-color: #d59a9a; color: #901f1f; }
+      .grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
+      .card { background: #fff; border: 1px solid #96abd7; padding: 12px; }
+      .user-row { border: 1px solid #d7e1f6; background: #fafcff; padding: 8px; margin-bottom: 8px; }
+      .user-row h4 { margin: 0 0 5px; }
+      .small { color: #566a90; font-size: 12px; }
+      input { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #9bb1da; margin-bottom: 8px; }
+      .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+      .mini { border: 1px solid #8da6d7; background: #eef3ff; color: #1e3f81; padding: 5px 8px; cursor: pointer; }
+      @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="bar">
+        <button class="btn" id="homeBtn" type="button">Dashboard</button>
+        <button class="btn" id="chatBtn" type="button">Chat</button>
+      </div>
+
+      <div id="okMsg" class="msg ok"></div>
+      <div id="errMsg" class="msg err"></div>
+
+      <div class="grid">
+        <section class="card">
+          <h3>Send Request</h3>
+          <input id="friendUsername" placeholder="Enter username" maxlength="20" />
+          <button class="btn" id="sendBtn" type="button">Send Request</button>
+        </section>
+
+        <section class="card">
+          <h3>Incoming Requests</h3>
+          <div id="requestsList"></div>
+        </section>
+
+        <section class="card">
+          <h3>Friends List</h3>
+          <div id="friendsList"></div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      function showError(message) {
+        const err = document.getElementById('errMsg');
+        const ok = document.getElementById('okMsg');
+        ok.style.display = 'none';
+        err.textContent = message;
+        err.style.display = 'block';
+      }
+
+      function showOk(message) {
+        const err = document.getElementById('errMsg');
+        const ok = document.getElementById('okMsg');
+        err.style.display = 'none';
+        ok.textContent = message;
+        ok.style.display = 'block';
+      }
+
+      async function fetchJSON(url, options = {}) {
+        const response = await fetch(url, options);
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          window.location.href = '/';
+          return null;
+        }
+        if (!response.ok) {
+          throw new Error(data.error || 'Request failed.');
+        }
+        return data;
+      }
+
+      function createRequestCard(request) {
+        const row = document.createElement('div');
+        row.className = 'user-row';
+        row.innerHTML = `<h4>${request.username}</h4><div class="small">${request.status || 'No status'}</div>`;
+
+        const actions = document.createElement('div');
+        actions.className = 'row-actions';
+
+        const accept = document.createElement('button');
+        accept.className = 'mini';
+        accept.textContent = 'Accept';
+        accept.onclick = async () => {
+          const result = await fetchJSON('/api/friends/accept', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: request.username }),
+          });
+          showOk(result.message);
+          await loadFriendsData();
+        };
+
+        const decline = document.createElement('button');
+        decline.className = 'mini';
+        decline.textContent = 'Decline';
+        decline.onclick = async () => {
+          const result = await fetchJSON('/api/friends/decline', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: request.username }),
+          });
+          showOk(result.message);
+          await loadFriendsData();
+        };
+
+        actions.appendChild(accept);
+        actions.appendChild(decline);
+        row.appendChild(actions);
+
+        return row;
+      }
+
+      function createFriendCard(friend) {
+        const row = document.createElement('div');
+        row.className = 'user-row';
+        row.innerHTML = `<h4>${friend.username}</h4><div class="small">${friend.status || 'No status'}</div>`;
+
+        const actions = document.createElement('div');
+        actions.className = 'row-actions';
+
+        const view = document.createElement('button');
+        view.className = 'mini';
+        view.textContent = 'View Profile';
+        view.onclick = () => {
+          window.location.href = `/profile.html?username=${encodeURIComponent(friend.username)}`;
+        };
+
+        const message = document.createElement('button');
+        message.className = 'mini';
+        message.textContent = 'Message';
+        message.onclick = () => {
+          window.location.href = `/chat.html?username=${encodeURIComponent(friend.username)}`;
+        };
+
+        const remove = document.createElement('button');
+        remove.className = 'mini';
+        remove.textContent = 'Remove';
+        remove.onclick = async () => {
+          const result = await fetchJSON('/api/friends/remove', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: friend.username }),
+          });
+          showOk(result.message);
+          await loadFriendsData();
+        };
+
+        actions.appendChild(view);
+        actions.appendChild(message);
+        actions.appendChild(remove);
+        row.appendChild(actions);
+
+        return row;
+      }
+
+      async function loadFriendsData() {
+        const [requestsData, friendsData] = await Promise.all([
+          fetchJSON('/api/friends/requests'),
+          fetchJSON('/api/friends/list'),
+        ]);
+
+        if (!requestsData || !friendsData) return;
+
+        const requestsList = document.getElementById('requestsList');
+        requestsList.innerHTML = '';
+        if (!requestsData.requests.length) {
+          requestsList.innerHTML = '<div class="small">No incoming requests.</div>';
+        } else {
+          requestsData.requests.forEach((request) => requestsList.appendChild(createRequestCard(request)));
+        }
+
+        const friendsList = document.getElementById('friendsList');
+        friendsList.innerHTML = '';
+        if (!friendsData.friends.length) {
+          friendsList.innerHTML = '<div class="small">No friends yet.</div>';
+        } else {
+          friendsData.friends.forEach((friend) => friendsList.appendChild(createFriendCard(friend)));
+        }
+      }
+
+      document.getElementById('sendBtn').addEventListener('click', async () => {
+        const username = document.getElementById('friendUsername').value.trim();
+        if (!username) {
+          showError('Enter a username first.');
+          return;
+        }
+
+        try {
+          const result = await fetchJSON('/api/friends/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username }),
+          });
+          showOk(result.message);
+          document.getElementById('friendUsername').value = '';
+          await loadFriendsData();
+        } catch (error) {
+          showError(error.message);
+        }
+      });
+
+      document.getElementById('homeBtn').addEventListener('click', () => (window.location.href = '/dashboard.html'));
+      document.getElementById('chatBtn').addEventListener('click', () => (window.location.href = '/chat.html'));
+
+      loadFriendsData().catch((error) => showError(error.message));
+    </script>
+  </body>
+</html>
