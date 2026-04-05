@@ -32,6 +32,121 @@
       .notification-item { background: #fff; border: 1px solid #d9e3f7; padding: 8px; margin-bottom: 8px; border-radius: 3px; font-size: 13px; }
       .muted { color: #4f5f7e; font-size: 13px; }
       @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .notif-dropdown { right: -100px; } }
+      body {
+        margin: 0;
+        font-family: Verdana, Tahoma, sans-serif;
+        background: #d7e4fb;
+        color: #1f2d46;
+      }
+
+      .topbar {
+        background: linear-gradient(#517ed4, #3d69bf);
+        color: #fff;
+        border-bottom: 1px solid #274a95;
+        padding: 10px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .brand {
+        font-weight: bold;
+        letter-spacing: 0.4px;
+      }
+
+      .btn {
+        border: 1px solid #2e5cb0;
+        background: linear-gradient(#75a0ef, #4f7fd9);
+        color: #fff;
+        padding: 8px 12px;
+        cursor: pointer;
+        border-radius: 3px;
+      }
+
+      .container {
+        max-width: 1100px;
+        margin: 14px auto;
+        padding: 0 12px 14px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1.1fr 1fr 1fr;
+        gap: 12px;
+      }
+
+      .card {
+        border: 1px solid #97add7;
+        background: #f8fbff;
+        box-shadow: 0 1px 0 #c9d7f0;
+        border-radius: 4px;
+        padding: 12px;
+      }
+
+      .card h3 {
+        margin-top: 0;
+      }
+
+      .profile-head {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .avatar {
+        width: 88px;
+        height: 88px;
+        border: 1px solid #7d95c6;
+        border-radius: 6px;
+        background: #d7e4fb;
+        object-fit: cover;
+      }
+
+      .stats {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+
+      .stats li {
+        padding: 6px 0;
+        border-bottom: 1px solid #d5e0f4;
+      }
+
+      .quick-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+        gap: 8px;
+      }
+
+      .quick-grid button {
+        border: 1px solid #7690bf;
+        background: #edf3ff;
+        color: #1f3e7c;
+        padding: 10px;
+        cursor: pointer;
+        font-weight: bold;
+      }
+
+      .notification-item {
+        background: #fff;
+        border: 1px solid #d9e3f7;
+        padding: 8px;
+        margin-bottom: 8px;
+        border-radius: 3px;
+        font-size: 13px;
+      }
+
+      .muted {
+        color: #4f5f7e;
+        font-size: 13px;
+      }
+
+      @media (max-width: 900px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
     </style>
   </head>
   <body>
@@ -48,6 +163,7 @@
             <div id="notifList"></div>
           </div>
         </div>
+      <div>
         <button id="profileNav" class="btn" type="button">My Profile</button>
         <button id="logoutBtn" class="btn" type="button">Logout</button>
       </div>
@@ -55,6 +171,7 @@
 
     <div class="container">
       <div id="errorBox" class="card" style="display:none;color:#8f1f1f;background:#ffe5e5"></div>
+      <div id="errorBox" class="card" style="display: none; color: #8f1f1f; background: #ffe5e5"></div>
 
       <div class="grid">
         <section class="card">
@@ -68,6 +185,8 @@
             </div>
           </div>
           <ul class="stats" style="margin-top:10px">
+
+          <ul class="stats" style="margin-top: 10px">
             <li>SculptCoins: <strong id="coinsText">0</strong></li>
             <li>Diamonds: <strong id="diamondsText">0</strong></li>
             <li>Points: <strong id="pointsText">0</strong></li>
@@ -81,12 +200,15 @@
           <p class="muted" id="dailyRewardSubText"></p>
 
           <h3 style="margin-top:18px">Quick Access</h3>
+          <h3 style="margin-top: 18px">Quick Access</h3>
           <div class="quick-grid" id="quickLinks"></div>
         </section>
 
         <section class="card">
           <h3>Recent Notifications</h3>
           <div id="notificationsPreview"></div>
+          <h3>Notifications</h3>
+          <div id="notificationsList"></div>
         </section>
       </div>
     </div>
@@ -170,6 +292,11 @@
 
         document.getElementById('notifBadge').textContent = data.unreadCount;
         renderNotifDropdown(data.notifications);
+        try {
+          return new Date(isoDate).toLocaleDateString();
+        } catch {
+          return '-';
+        }
       }
 
       function renderDashboard(payload) {
@@ -187,6 +314,14 @@
           ? `Today's ${payload.dailyReward.amount} ${payload.dailyReward.currency} reward has been claimed.`
           : `You can claim ${payload.dailyReward.amount} ${payload.dailyReward.currency} today!`;
 
+        document.getElementById('joinDateText').textContent = formatDate(payload.user.createdAt);
+        document.getElementById('avatarPreview').src = payload.user.avatarPreview || '/assets/default-avatar.svg';
+
+        const rewardText = payload.dailyReward.claimedToday
+          ? `Today's ${payload.dailyReward.amount} ${payload.dailyReward.currency} reward has been claimed.`
+          : `You can claim ${payload.dailyReward.amount} ${payload.dailyReward.currency} today!`;
+
+        document.getElementById('dailyRewardText').textContent = rewardText;
         document.getElementById('dailyRewardSubText').textContent = payload.dailyReward.claimedToday
           ? `Next claim opens on ${new Date(payload.dailyReward.nextClaimAt).toLocaleString()}.`
           : 'Login daily to keep your reward streak going!';
@@ -210,6 +345,20 @@
           Chat: '/chat.html',
         };
 
+        const notificationsList = document.getElementById('notificationsList');
+        notificationsList.innerHTML = '';
+
+        if (!payload.notifications.length) {
+          notificationsList.innerHTML = '<p class="muted">No notifications yet.</p>';
+        } else {
+          payload.notifications.forEach((note) => {
+            const item = document.createElement('div');
+            item.className = 'notification-item';
+            item.textContent = note;
+            notificationsList.appendChild(item);
+          });
+        }
+
         const quickLinks = document.getElementById('quickLinks');
         quickLinks.innerHTML = '';
         payload.quickLinks.forEach((name) => {
@@ -219,6 +368,8 @@
           btn.addEventListener('click', () => {
             if (routeMap[name]) {
               window.location.href = routeMap[name];
+            if (name === 'Profile') {
+              window.location.href = `/profile.html?username=${encodeURIComponent(currentUsername)}`;
               return;
             }
 
@@ -231,6 +382,19 @@
       async function loadDashboard() {
         const data = await fetchJSON('/api/dashboard-data');
         if (!data) return;
+        const response = await fetch('/api/dashboard-data');
+
+        if (response.status === 401) {
+          window.location.href = '/';
+          return;
+        }
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Could not load dashboard.');
+        }
+
         renderDashboard(data);
       }
 
@@ -266,6 +430,24 @@
       });
 
       Promise.all([loadDashboard(), loadNotifications()]).catch((error) => setError(error.message));
+        const response = await fetch('/api/logout', { method: 'POST' });
+        if (response.ok) {
+          window.location.href = '/';
+          return;
+        }
+
+        setError('Logout failed. Please try again.');
+      });
+
+      document.getElementById('profileNav').addEventListener('click', () => {
+        if (!currentUsername) {
+          return;
+        }
+
+        window.location.href = `/profile.html?username=${encodeURIComponent(currentUsername)}`;
+      });
+
+      loadDashboard().catch((error) => setError(error.message));
     </script>
   </body>
 </html>

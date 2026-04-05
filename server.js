@@ -13,6 +13,7 @@ const NOTIFICATIONS_FILE = path.join(__dirname, 'notifications.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 const MAX_BIO_LENGTH = 280;
 const MAX_MESSAGE_LENGTH = 600;
+const MAX_BIO_LENGTH = 280;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -31,6 +32,21 @@ const sessionMiddleware = session({
 });
 
 app.use(sessionMiddleware);
+app.use(
+  session({
+    name: 'playsculpt.sid',
+    secret: process.env.SESSION_SECRET || 'dev_only_change_me',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 1000 * 60 * 60 * 24 * 7,
+    },
+  })
+);
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 async function ensureJsonFile(filePath) {
@@ -44,6 +60,9 @@ async function ensureJsonFile(filePath) {
 async function readArrayFile(filePath) {
   await ensureJsonFile(filePath);
   const raw = await fs.readFile(filePath, 'utf8');
+async function readUsers() {
+  await ensureUsersFile();
+  const raw = await fs.readFile(USERS_FILE, 'utf8');
 
   try {
     const parsed = JSON.parse(raw);
@@ -97,6 +116,9 @@ function ensureUserShape(user) {
   user.friends = uniqueStringArray(user.friends);
   user.friendRequests = uniqueStringArray(user.friendRequests);
   user.sentFriendRequests = uniqueStringArray(user.sentFriendRequests);
+  user.friends = Array.isArray(user.friends) ? user.friends : [];
+  user.friendRequests = Array.isArray(user.friendRequests) ? user.friendRequests : [];
+  user.notifications = Array.isArray(user.notifications) ? user.notifications : [];
   user.avatar = user.avatar && typeof user.avatar === 'object' ? user.avatar : {};
 
   if (!user.profile || typeof user.profile !== 'object') {
@@ -113,6 +135,48 @@ function ensureUserShape(user) {
   user.profile.joinDate = typeof user.profile.joinDate === 'string' ? user.profile.joinDate : user.createdAt;
 
   return user;
+}
+
+function toPublicUser(user) {
+  const cleanUser = ensureUserShape(user);
+  return {
+    id: cleanUser.id,
+    username: cleanUser.username,
+    sculptCoins: cleanUser.sculptCoins,
+    diamonds: cleanUser.diamonds,
+    points: cleanUser.points,
+    friends: cleanUser.friends,
+    friendRequests: cleanUser.friendRequests,
+    notifications: cleanUser.notifications,
+    avatar: cleanUser.avatar,
+    createdAt: cleanUser.createdAt,
+    profile: cleanUser.profile,
+  };
+}
+
+function getAvatarPreview(avatar) {
+  if (avatar && typeof avatar === 'object' && typeof avatar.imageUrl === 'string' && avatar.imageUrl.trim()) {
+    return avatar.imageUrl.trim();
+  }
+
+  return '/assets/default-avatar.svg';
+}
+
+function toProfilePublicView(user, viewerUserId) {
+  const cleanUser = ensureUserShape(user);
+  const isOwnProfile = viewerUserId ? cleanUser.id === viewerUserId : false;
+
+  return {
+    username: cleanUser.username,
+    joinDate: cleanUser.profile.joinDate,
+    avatar: getAvatarPreview(cleanUser.avatar),
+    friendsCount: cleanUser.friends.length,
+    gamesCreated: cleanUser.profile.gamesCreated,
+    bio: cleanUser.profile.bio,
+    status: cleanUser.profile.status,
+    themeColor: cleanUser.profile.themeColor,
+    canEdit: isOwnProfile,
+  };
 }
 
 function validateUsername(username) {
@@ -267,6 +331,7 @@ app.post('/api/signup', async (req, res) => {
       friends: [],
       friendRequests: [],
       sentFriendRequests: [],
+      notifications: ['Welcome to PlaySculpt! Start building your first world.'],
       avatar: {},
       createdAt: now,
       lastDailyRewardAt: null,
@@ -385,6 +450,12 @@ app.get('/api/dashboard-data', requireAuth, async (req, res) => {
     const now = new Date();
     const todayKey = now.toISOString().slice(0, 10);
     const lastRewardKey = typeof user.lastDailyRewardAt === 'string' ? user.lastDailyRewardAt.slice(0, 10) : null;
+    const cleanUser = ensureUserShape(user);
+    const now = new Date();
+    const todayKey = now.toISOString().slice(0, 10);
+    const lastRewardKey = typeof cleanUser.lastDailyRewardAt === 'string'
+      ? cleanUser.lastDailyRewardAt.slice(0, 10)
+      : null;
 
     const dailyReward = {
       amount: 25,
@@ -408,6 +479,18 @@ app.get('/api/dashboard-data', requireAuth, async (req, res) => {
       },
       notificationsPreview: ownNotifications.slice(0, 5),
       unreadNotifications: ownNotifications.filter((notification) => !notification.read).length,
+        username: cleanUser.username,
+        sculptCoins: cleanUser.sculptCoins,
+        diamonds: cleanUser.diamonds,
+        points: cleanUser.points,
+        avatarPreview: getAvatarPreview(cleanUser.avatar),
+        createdAt: cleanUser.createdAt,
+      },
+      social: {
+        friendsCount: cleanUser.friends.length,
+        friendRequestCount: cleanUser.friendRequests.length,
+      },
+      notifications: cleanUser.notifications.slice(0, 5),
       dailyReward,
       quickLinks: [
         'Friends',
@@ -436,6 +519,9 @@ app.get('/api/profile/:username', async (req, res) => {
 
     const users = await readUsers();
     const user = findUserByUsername(users, username);
+    const user = users.find(
+      (item) => item.username.toLowerCase() === username.trim().toLowerCase()
+    );
 
     if (!user) {
       return res.status(404).json({ error: 'Profile not found.' });
@@ -443,6 +529,9 @@ app.get('/api/profile/:username', async (req, res) => {
 
     const viewerUserId = req.session.userId || null;
     return res.json({ profile: toProfilePublicView(user, viewerUserId) });
+    return res.json({
+      profile: toProfilePublicView(user, viewerUserId),
+    });
   } catch (error) {
     console.error('Profile fetch error:', error);
     return res.status(500).json({ error: 'Server error while fetching profile.' });
@@ -481,6 +570,7 @@ app.post('/api/profile/update', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Theme color must be a valid 6-digit hex color.' });
     }
 
+    ensureUserShape(sessionUser);
     sessionUser.profile.bio = cleanBio;
     sessionUser.profile.status = cleanStatus || 'Ready to sculpt!';
     sessionUser.profile.themeColor = cleanThemeColor;
