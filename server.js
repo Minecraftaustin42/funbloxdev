@@ -8,10 +8,11 @@ const { Server } = require('socket.io');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
 const USERS_FILE = path.join(__dirname, 'users.json');
 const NOTIFICATIONS_FILE = path.join(__dirname, 'notifications.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
-const MAX_BIO_LENGTH = 280;
+
 const MAX_MESSAGE_LENGTH = 600;
 const MAX_BIO_LENGTH = 280;
 
@@ -32,21 +33,6 @@ const sessionMiddleware = session({
 });
 
 app.use(sessionMiddleware);
-app.use(
-  session({
-    name: 'playsculpt.sid',
-    secret: process.env.SESSION_SECRET || 'dev_only_change_me',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 1000 * 60 * 60 * 24 * 7,
-    },
-  })
-);
-
 app.use(express.static(path.join(__dirname, 'public')));
 
 async function ensureJsonFile(filePath) {
@@ -60,9 +46,6 @@ async function ensureJsonFile(filePath) {
 async function readArrayFile(filePath) {
   await ensureJsonFile(filePath);
   const raw = await fs.readFile(filePath, 'utf8');
-async function readUsers() {
-  await ensureUsersFile();
-  const raw = await fs.readFile(USERS_FILE, 'utf8');
 
   try {
     const parsed = JSON.parse(raw);
@@ -74,6 +57,69 @@ async function readUsers() {
 
 async function writeArrayFile(filePath, data) {
   await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
+}
+
+function uniqueStringArray(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return [...new Set(values.filter((value) => typeof value === 'string' && value.trim()))];
+}
+
+function ensureUserShape(user) {
+  if (!user || typeof user !== 'object') {
+    return {
+      id: '',
+      username: '',
+      passwordHash: '',
+      sculptCoins: 0,
+      diamonds: 0,
+      points: 0,
+      friends: [],
+      friendRequests: [],
+      sentFriendRequests: [],
+      notifications: [],
+      avatar: {},
+      createdAt: new Date().toISOString(),
+      lastDailyRewardAt: null,
+      profile: {
+        bio: '',
+        status: 'Ready to sculpt!',
+        themeColor: '#4f7fd9',
+        gamesCreated: 0,
+        joinDate: new Date().toISOString(),
+      },
+    };
+  }
+
+  user.sculptCoins = Number.isFinite(user.sculptCoins) ? user.sculptCoins : 0;
+  user.diamonds = Number.isFinite(user.diamonds) ? user.diamonds : 0;
+  user.points = Number.isFinite(user.points) ? user.points : 0;
+  user.friends = uniqueStringArray(user.friends);
+  user.friendRequests = uniqueStringArray(user.friendRequests);
+  user.sentFriendRequests = uniqueStringArray(user.sentFriendRequests);
+  user.notifications = Array.isArray(user.notifications) ? user.notifications : [];
+  user.avatar = user.avatar && typeof user.avatar === 'object' ? user.avatar : {};
+
+  if (!user.profile || typeof user.profile !== 'object') {
+    user.profile = {};
+  }
+
+  user.profile.bio = typeof user.profile.bio === 'string' ? user.profile.bio : '';
+  user.profile.status =
+    typeof user.profile.status === 'string' ? user.profile.status : 'Ready to sculpt!';
+  user.profile.themeColor =
+    typeof user.profile.themeColor === 'string' ? user.profile.themeColor : '#4f7fd9';
+  user.profile.gamesCreated = Number.isFinite(user.profile.gamesCreated)
+    ? user.profile.gamesCreated
+    : 0;
+  user.profile.joinDate =
+    typeof user.profile.joinDate === 'string'
+      ? user.profile.joinDate
+      : user.createdAt || new Date().toISOString();
+
+  return user;
 }
 
 async function readUsers() {
@@ -101,44 +147,22 @@ async function writeMessages(messages) {
   await writeArrayFile(MESSAGES_FILE, messages);
 }
 
-function uniqueStringArray(values) {
-  if (!Array.isArray(values)) {
-    return [];
+function getAvatarPreview(avatar) {
+  if (
+    avatar &&
+    typeof avatar === 'object' &&
+    typeof avatar.imageUrl === 'string' &&
+    avatar.imageUrl.trim()
+  ) {
+    return avatar.imageUrl.trim();
   }
 
-  return [...new Set(values.filter((value) => typeof value === 'string' && value.trim()))];
-}
-
-function ensureUserShape(user) {
-  user.sculptCoins = Number.isFinite(user.sculptCoins) ? user.sculptCoins : 0;
-  user.diamonds = Number.isFinite(user.diamonds) ? user.diamonds : 0;
-  user.points = Number.isFinite(user.points) ? user.points : 0;
-  user.friends = uniqueStringArray(user.friends);
-  user.friendRequests = uniqueStringArray(user.friendRequests);
-  user.sentFriendRequests = uniqueStringArray(user.sentFriendRequests);
-  user.friends = Array.isArray(user.friends) ? user.friends : [];
-  user.friendRequests = Array.isArray(user.friendRequests) ? user.friendRequests : [];
-  user.notifications = Array.isArray(user.notifications) ? user.notifications : [];
-  user.avatar = user.avatar && typeof user.avatar === 'object' ? user.avatar : {};
-
-  if (!user.profile || typeof user.profile !== 'object') {
-    user.profile = {};
-  }
-
-  user.profile.bio = typeof user.profile.bio === 'string' ? user.profile.bio : '';
-  user.profile.status = typeof user.profile.status === 'string' ? user.profile.status : 'Ready to sculpt!';
-  user.profile.themeColor =
-    typeof user.profile.themeColor === 'string' ? user.profile.themeColor : '#4f7fd9';
-  user.profile.gamesCreated = Number.isFinite(user.profile.gamesCreated)
-    ? user.profile.gamesCreated
-    : 0;
-  user.profile.joinDate = typeof user.profile.joinDate === 'string' ? user.profile.joinDate : user.createdAt;
-
-  return user;
+  return '/assets/default-avatar.svg';
 }
 
 function toPublicUser(user) {
   const cleanUser = ensureUserShape(user);
+
   return {
     id: cleanUser.id,
     username: cleanUser.username,
@@ -147,19 +171,12 @@ function toPublicUser(user) {
     points: cleanUser.points,
     friends: cleanUser.friends,
     friendRequests: cleanUser.friendRequests,
+    sentFriendRequests: cleanUser.sentFriendRequests,
     notifications: cleanUser.notifications,
     avatar: cleanUser.avatar,
     createdAt: cleanUser.createdAt,
     profile: cleanUser.profile,
   };
-}
-
-function getAvatarPreview(avatar) {
-  if (avatar && typeof avatar === 'object' && typeof avatar.imageUrl === 'string' && avatar.imageUrl.trim()) {
-    return avatar.imageUrl.trim();
-  }
-
-  return '/assets/default-avatar.svg';
 }
 
 function toProfilePublicView(user, viewerUserId) {
@@ -185,6 +202,7 @@ function validateUsername(username) {
   }
 
   const trimmed = username.trim();
+
   if (trimmed.length < 1 || trimmed.length > 20) {
     return 'Username must be 1 to 20 characters.';
   }
@@ -216,48 +234,6 @@ function validateThemeColor(color) {
   return /^#[0-9A-Fa-f]{6}$/.test(color.trim());
 }
 
-function getAvatarPreview(avatar) {
-  if (avatar && typeof avatar === 'object' && typeof avatar.imageUrl === 'string' && avatar.imageUrl.trim()) {
-    return avatar.imageUrl.trim();
-  }
-
-  return '/assets/default-avatar.svg';
-}
-
-function toPublicUser(user) {
-  const cleanUser = ensureUserShape(user);
-  return {
-    id: cleanUser.id,
-    username: cleanUser.username,
-    sculptCoins: cleanUser.sculptCoins,
-    diamonds: cleanUser.diamonds,
-    points: cleanUser.points,
-    friends: cleanUser.friends,
-    friendRequests: cleanUser.friendRequests,
-    sentFriendRequests: cleanUser.sentFriendRequests,
-    avatar: cleanUser.avatar,
-    createdAt: cleanUser.createdAt,
-    profile: cleanUser.profile,
-  };
-}
-
-function toProfilePublicView(user, viewerUserId) {
-  const cleanUser = ensureUserShape(user);
-  const isOwnProfile = viewerUserId ? cleanUser.id === viewerUserId : false;
-
-  return {
-    username: cleanUser.username,
-    joinDate: cleanUser.profile.joinDate,
-    avatar: getAvatarPreview(cleanUser.avatar),
-    friendsCount: cleanUser.friends.length,
-    gamesCreated: cleanUser.profile.gamesCreated,
-    bio: cleanUser.profile.bio,
-    status: cleanUser.profile.status,
-    themeColor: cleanUser.profile.themeColor,
-    canEdit: isOwnProfile,
-  };
-}
-
 function requireAuth(req, res, next) {
   if (!req.session.userId) {
     return res.status(401).json({ error: 'Not authenticated.' });
@@ -267,7 +243,9 @@ function requireAuth(req, res, next) {
 }
 
 function findUserByUsername(users, username) {
-  return users.find((user) => user.username.toLowerCase() === username.trim().toLowerCase());
+  return users.find(
+    (user) => user.username.toLowerCase() === username.trim().toLowerCase()
+  );
 }
 
 function areFriends(userA, userB) {
@@ -280,6 +258,7 @@ function getConversationKey(idA, idB) {
 
 async function createNotification({ userId, type, text, actionLink = '' }) {
   const notifications = await readNotifications();
+
   const notification = {
     id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
     userId,
@@ -346,6 +325,7 @@ app.post('/api/signup', async (req, res) => {
 
     users.push(newUser);
     await writeUsers(users);
+
     await createNotification({
       userId: newUser.id,
       type: 'system_message',
@@ -448,37 +428,26 @@ app.get('/api/dashboard-data', requireAuth, async (req, res) => {
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     const now = new Date();
-    const todayKey = now.toISOString().slice(0, 10);
-    const lastRewardKey = typeof user.lastDailyRewardAt === 'string' ? user.lastDailyRewardAt.slice(0, 10) : null;
     const cleanUser = ensureUserShape(user);
-    const now = new Date();
     const todayKey = now.toISOString().slice(0, 10);
-    const lastRewardKey = typeof cleanUser.lastDailyRewardAt === 'string'
-      ? cleanUser.lastDailyRewardAt.slice(0, 10)
-      : null;
+    const lastRewardKey =
+      typeof cleanUser.lastDailyRewardAt === 'string'
+        ? cleanUser.lastDailyRewardAt.slice(0, 10)
+        : null;
 
     const dailyReward = {
       amount: 25,
       currency: 'SculptCoins',
       claimedToday: lastRewardKey === todayKey,
-      nextClaimAt: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString(),
+      nextClaimAt: new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1
+      ).toISOString(),
     };
 
     return res.json({
       user: {
-        username: user.username,
-        sculptCoins: user.sculptCoins,
-        diamonds: user.diamonds,
-        points: user.points,
-        avatarPreview: getAvatarPreview(user.avatar),
-        createdAt: user.createdAt,
-      },
-      social: {
-        friendsCount: user.friends.length,
-        friendRequestCount: user.friendRequests.length,
-      },
-      notificationsPreview: ownNotifications.slice(0, 5),
-      unreadNotifications: ownNotifications.filter((notification) => !notification.read).length,
         username: cleanUser.username,
         sculptCoins: cleanUser.sculptCoins,
         diamonds: cleanUser.diamonds,
@@ -490,7 +459,8 @@ app.get('/api/dashboard-data', requireAuth, async (req, res) => {
         friendsCount: cleanUser.friends.length,
         friendRequestCount: cleanUser.friendRequests.length,
       },
-      notifications: cleanUser.notifications.slice(0, 5),
+      notificationsPreview: ownNotifications.slice(0, 5),
+      unreadNotifications: ownNotifications.filter((notification) => !notification.read).length,
       dailyReward,
       quickLinks: [
         'Friends',
@@ -513,22 +483,20 @@ app.get('/api/profile/:username', async (req, res) => {
   try {
     const username = req.params.username;
     const usernameError = validateUsername(username);
+
     if (usernameError) {
       return res.status(400).json({ error: usernameError });
     }
 
     const users = await readUsers();
     const user = findUserByUsername(users, username);
-    const user = users.find(
-      (item) => item.username.toLowerCase() === username.trim().toLowerCase()
-    );
 
     if (!user) {
       return res.status(404).json({ error: 'Profile not found.' });
     }
 
-    const viewerUserId = req.session.userId || null;
-    return res.json({ profile: toProfilePublicView(user, viewerUserId) });
+    const viewerUserId = req.session?.userId || null;
+
     return res.json({
       profile: toProfilePublicView(user, viewerUserId),
     });
@@ -549,6 +517,7 @@ app.post('/api/profile/update', requireAuth, async (req, res) => {
 
     const users = await readUsers();
     const sessionUser = users.find((item) => item.id === req.session.userId);
+
     if (!sessionUser) {
       req.session.destroy(() => {});
       return res.status(401).json({ error: 'Session invalid.' });
@@ -563,11 +532,15 @@ app.post('/api/profile/update', requireAuth, async (req, res) => {
     const cleanThemeColor = typeof themeColor === 'string' ? themeColor.trim() : '';
 
     if (cleanBio.length > MAX_BIO_LENGTH) {
-      return res.status(400).json({ error: `Bio must be ${MAX_BIO_LENGTH} characters or fewer.` });
+      return res
+        .status(400)
+        .json({ error: `Bio must be ${MAX_BIO_LENGTH} characters or fewer.` });
     }
 
     if (!validateThemeColor(cleanThemeColor)) {
-      return res.status(400).json({ error: 'Theme color must be a valid 6-digit hex color.' });
+      return res
+        .status(400)
+        .json({ error: 'Theme color must be a valid 6-digit hex color.' });
     }
 
     ensureUserShape(sessionUser);
@@ -591,6 +564,7 @@ app.post('/api/friends/send', requireAuth, async (req, res) => {
   try {
     const { username } = req.body || {};
     const usernameError = validateUsername(username);
+
     if (usernameError) {
       return res.status(400).json({ error: usernameError });
     }
@@ -604,7 +578,9 @@ app.post('/api/friends/send', requireAuth, async (req, res) => {
     }
 
     if (currentUser.id === targetUser.id) {
-      return res.status(400).json({ error: 'You cannot send a friend request to yourself.' });
+      return res
+        .status(400)
+        .json({ error: 'You cannot send a friend request to yourself.' });
     }
 
     if (areFriends(currentUser, targetUser)) {
@@ -619,13 +595,16 @@ app.post('/api/friends/send', requireAuth, async (req, res) => {
     }
 
     if (currentUser.friendRequests.includes(targetUser.id)) {
-      return res.status(409).json({ error: 'This user already sent you a friend request. Accept it instead.' });
+      return res.status(409).json({
+        error: 'This user already sent you a friend request. Accept it instead.',
+      });
     }
 
     targetUser.friendRequests.push(currentUser.id);
     currentUser.sentFriendRequests.push(targetUser.id);
 
     await writeUsers(users);
+
     await createNotification({
       userId: targetUser.id,
       type: 'friend_request',
@@ -644,6 +623,7 @@ app.post('/api/friends/accept', requireAuth, async (req, res) => {
   try {
     const { username } = req.body || {};
     const usernameError = validateUsername(username);
+
     if (usernameError) {
       return res.status(400).json({ error: usernameError });
     }
@@ -660,17 +640,23 @@ app.post('/api/friends/accept', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Friend request not found.' });
     }
 
-    currentUser.friendRequests = currentUser.friendRequests.filter((id) => id !== requester.id);
-    requester.sentFriendRequests = requester.sentFriendRequests.filter((id) => id !== currentUser.id);
+    currentUser.friendRequests = currentUser.friendRequests.filter(
+      (id) => id !== requester.id
+    );
+    requester.sentFriendRequests = requester.sentFriendRequests.filter(
+      (id) => id !== currentUser.id
+    );
 
     if (!currentUser.friends.includes(requester.id)) {
       currentUser.friends.push(requester.id);
     }
+
     if (!requester.friends.includes(currentUser.id)) {
       requester.friends.push(currentUser.id);
     }
 
     await writeUsers(users);
+
     await createNotification({
       userId: requester.id,
       type: 'friend_accept',
@@ -689,6 +675,7 @@ app.post('/api/friends/decline', requireAuth, async (req, res) => {
   try {
     const { username } = req.body || {};
     const usernameError = validateUsername(username);
+
     if (usernameError) {
       return res.status(400).json({ error: usernameError });
     }
@@ -705,8 +692,12 @@ app.post('/api/friends/decline', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Friend request not found.' });
     }
 
-    currentUser.friendRequests = currentUser.friendRequests.filter((id) => id !== requester.id);
-    requester.sentFriendRequests = requester.sentFriendRequests.filter((id) => id !== currentUser.id);
+    currentUser.friendRequests = currentUser.friendRequests.filter(
+      (id) => id !== requester.id
+    );
+    requester.sentFriendRequests = requester.sentFriendRequests.filter(
+      (id) => id !== currentUser.id
+    );
 
     await writeUsers(users);
 
@@ -721,6 +712,7 @@ app.post('/api/friends/remove', requireAuth, async (req, res) => {
   try {
     const { username } = req.body || {};
     const usernameError = validateUsername(username);
+
     if (usernameError) {
       return res.status(400).json({ error: usernameError });
     }
@@ -736,10 +728,18 @@ app.post('/api/friends/remove', requireAuth, async (req, res) => {
     currentUser.friends = currentUser.friends.filter((id) => id !== targetUser.id);
     targetUser.friends = targetUser.friends.filter((id) => id !== currentUser.id);
 
-    currentUser.sentFriendRequests = currentUser.sentFriendRequests.filter((id) => id !== targetUser.id);
-    currentUser.friendRequests = currentUser.friendRequests.filter((id) => id !== targetUser.id);
-    targetUser.sentFriendRequests = targetUser.sentFriendRequests.filter((id) => id !== currentUser.id);
-    targetUser.friendRequests = targetUser.friendRequests.filter((id) => id !== currentUser.id);
+    currentUser.sentFriendRequests = currentUser.sentFriendRequests.filter(
+      (id) => id !== targetUser.id
+    );
+    currentUser.friendRequests = currentUser.friendRequests.filter(
+      (id) => id !== targetUser.id
+    );
+    targetUser.sentFriendRequests = targetUser.sentFriendRequests.filter(
+      (id) => id !== currentUser.id
+    );
+    targetUser.friendRequests = targetUser.friendRequests.filter(
+      (id) => id !== currentUser.id
+    );
 
     await writeUsers(users);
 
@@ -797,7 +797,9 @@ app.get('/api/friends/requests', requireAuth, async (req, res) => {
     return res.json({ requests });
   } catch (error) {
     console.error('Friend requests error:', error);
-    return res.status(500).json({ error: 'Server error while loading friend requests.' });
+    return res
+      .status(500)
+      .json({ error: 'Server error while loading friend requests.' });
   }
 });
 
@@ -848,6 +850,7 @@ app.post('/api/notifications/read', requireAuth, async (req, res) => {
 app.post('/api/notifications/delete', requireAuth, async (req, res) => {
   try {
     const { id } = req.body || {};
+
     if (typeof id !== 'string' || !id.trim()) {
       return res.status(400).json({ error: 'Notification id is required.' });
     }
@@ -855,10 +858,12 @@ app.post('/api/notifications/delete', requireAuth, async (req, res) => {
     const notifications = await readNotifications();
     const beforeCount = notifications.length;
     const filtered = notifications.filter(
-      (notification) => !(notification.userId === req.session.userId && notification.id === id)
+      (notification) =>
+        !(notification.userId === req.session.userId && notification.id === id)
     );
 
     await writeNotifications(filtered);
+
     if (beforeCount === filtered.length) {
       return res.status(404).json({ error: 'Notification not found.' });
     }
@@ -873,6 +878,7 @@ app.post('/api/notifications/delete', requireAuth, async (req, res) => {
 app.post('/api/notifications/system', requireAuth, async (req, res) => {
   try {
     const { text, actionLink } = req.body || {};
+
     if (typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ error: 'Text is required.' });
     }
@@ -894,6 +900,7 @@ app.post('/api/notifications/system', requireAuth, async (req, res) => {
 app.post('/api/game-invites/send', requireAuth, async (req, res) => {
   try {
     const { username, gameName } = req.body || {};
+
     const usernameError = validateUsername(username);
     if (usernameError) {
       return res.status(400).json({ error: usernameError });
@@ -936,19 +943,24 @@ app.get('/api/chat/conversations', requireAuth, async (req, res) => {
     }
 
     const conversationMap = new Map();
+
     for (const message of messages) {
       const participants = [message.fromUserId, message.toUserId];
+
       if (!participants.includes(currentUser.id)) {
         continue;
       }
 
-      const otherUserId = message.fromUserId === currentUser.id ? message.toUserId : message.fromUserId;
+      const otherUserId =
+        message.fromUserId === currentUser.id ? message.toUserId : message.fromUserId;
+
       if (!currentUser.friends.includes(otherUserId)) {
         continue;
       }
 
       const key = getConversationKey(currentUser.id, otherUserId);
       const existing = conversationMap.get(key);
+
       if (!existing || new Date(message.createdAt) > new Date(existing.lastMessage.createdAt)) {
         conversationMap.set(key, {
           otherUserId,
@@ -960,6 +972,7 @@ app.get('/api/chat/conversations', requireAuth, async (req, res) => {
     const conversations = currentUser.friends
       .map((friendId) => {
         const friend = users.find((user) => user.id === friendId);
+
         if (!friend) {
           return null;
         }
@@ -988,6 +1001,7 @@ app.get('/api/chat/history/:username', requireAuth, async (req, res) => {
   try {
     const username = req.params.username;
     const usernameError = validateUsername(username);
+
     if (usernameError) {
       return res.status(400).json({ error: usernameError });
     }
@@ -1010,6 +1024,7 @@ app.get('/api/chat/history/:username', requireAuth, async (req, res) => {
         const betweenCurrentAndTarget =
           (message.fromUserId === currentUser.id && message.toUserId === targetUser.id) ||
           (message.fromUserId === targetUser.id && message.toUserId === currentUser.id);
+
         return betweenCurrentAndTarget;
       })
       .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
@@ -1033,13 +1048,16 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
+
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'Invalid JSON body.' });
   }
+
   return res.status(500).json({ error: 'Unexpected server error.' });
 });
 
 const httpServer = http.createServer(app);
+
 const io = new Server(httpServer, {
   cors: {
     origin: true,
@@ -1062,6 +1080,7 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   const userId = socket.request.session.userId;
   const userRoom = `user:${userId}`;
+
   socket.join(userRoom);
 
   socket.on('chat:send', async (payload, callback) => {
@@ -1081,7 +1100,10 @@ io.on('connection', (socket) => {
       }
 
       if (text.length > MAX_MESSAGE_LENGTH) {
-        callback?.({ ok: false, error: `Message must be ${MAX_MESSAGE_LENGTH} characters or fewer.` });
+        callback?.({
+          ok: false,
+          error: `Message must be ${MAX_MESSAGE_LENGTH} characters or fewer.`,
+        });
         return;
       }
 
@@ -1100,6 +1122,7 @@ io.on('connection', (socket) => {
       }
 
       const messages = await readMessages();
+
       const message = {
         id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
         fromUserId: sender.id,
