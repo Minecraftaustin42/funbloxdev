@@ -5,42 +5,117 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PlaySculpt Auth</title>
     <style>
+      :root {
+        --surface: rgba(255, 255, 255, 0.86);
+        --surface-border: rgba(41, 80, 148, 0.28);
+        --accent: #2b7bff;
+        --accent-strong: #0f58cf;
+        --ink: #1f2937;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
         margin: 0;
-        font-family: Arial, Helvetica, sans-serif;
-        background: #f2f2f2;
-        color: #222;
+        font-family: 'Trebuchet MS', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        color: var(--ink);
+        min-height: 100vh;
+        background: linear-gradient(180deg, #9fd9ff 0%, #d8f2ff 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 30px 18px;
       }
 
       .container {
-        max-width: 420px;
-        margin: 40px auto;
-        background: #fff;
-        border: 1px solid #ccc;
-        padding: 20px;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+        width: min(920px, 100%);
+        border-radius: 22px;
+        border: 1px solid var(--surface-border);
+        background: var(--surface);
+        box-shadow: 0 25px 60px rgba(8, 44, 92, 0.25);
+        backdrop-filter: blur(8px);
+        overflow: hidden;
       }
 
-      h1,
-      h2 {
-        margin-top: 0;
+      #authApp {
+        position: relative;
+        min-height: 640px;
+      }
+
+      #cityCanvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 0;
+        display: block;
+      }
+
+      .auth-overlay {
+        position: relative;
+        z-index: 1;
+        margin: 28px;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.78);
+        border: 1px solid rgba(255, 255, 255, 0.85);
+        padding: 28px;
+        box-shadow: 0 12px 25px rgba(13, 36, 78, 0.2);
+      }
+
+      .brand-title {
+        margin: 0;
+        text-align: center;
+        font-size: clamp(2.2rem, 4.5vw, 4rem);
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        color: #ffffff;
+        font-weight: 900;
+        text-shadow:
+          0 0 0 #000,
+          0 4px 0 #1957bc,
+          0 8px 18px rgba(16, 36, 75, 0.45),
+          0 0 24px rgba(43, 123, 255, 0.5);
+        background: linear-gradient(180deg, #eff8ff 0%, #89beff 58%, #2a71df 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+
+      .small {
+        text-align: center;
+        color: #284c84;
+        margin: 10px 0 24px;
+        font-size: 14px;
       }
 
       .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
         margin-bottom: 16px;
       }
 
       .tabs button {
-        border: 1px solid #999;
-        background: #eee;
-        padding: 8px 12px;
+        border: 1px solid #7faded;
+        background: rgba(228, 239, 255, 0.8);
+        padding: 10px 14px;
+        border-radius: 12px;
         cursor: pointer;
-        margin-right: 6px;
+        font-weight: 600;
+        color: #234174;
+        transition: transform 0.2s ease, background 0.2s ease;
+      }
+
+      .tabs button:hover {
+        transform: translateY(-1px);
+        background: rgba(216, 236, 255, 0.95);
       }
 
       .tabs button.active {
-        background: #dce8ff;
-        border-color: #4f7fd9;
+        background: linear-gradient(135deg, #3f8dff 0%, #2867d1 100%);
+        border-color: #1e58bf;
+        color: white;
       }
 
       .form-panel {
@@ -51,48 +126,111 @@
         display: block;
       }
 
+      h2 {
+        margin: 0 0 12px;
+      }
+
       label {
         display: block;
         margin: 10px 0 4px;
+        font-weight: 600;
       }
 
       input {
         width: 100%;
-        box-sizing: border-box;
-        border: 1px solid #aaa;
-        padding: 8px;
+        border: 1px solid #93b7ef;
+        border-radius: 10px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.92);
       }
 
       .btn {
         margin-top: 14px;
         width: 100%;
-        padding: 10px;
-        border: 1px solid #2f5fb8;
-        background: #4f7fd9;
+        padding: 11px;
+        border: 1px solid var(--accent-strong);
+        border-radius: 11px;
+        background: linear-gradient(135deg, #3f8dff 0%, #2867d1 100%);
         color: white;
         cursor: pointer;
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .error,
+      .success {
+        padding: 10px;
+        border-radius: 10px;
+        margin-bottom: 12px;
+        display: none;
       }
 
       .error {
         background: #ffe5e5;
         color: #8d1010;
         border: 1px solid #d89999;
-        padding: 10px;
-        margin-bottom: 12px;
-        display: none;
       }
 
       .success {
         background: #e8f7e8;
         color: #216821;
         border: 1px solid #9cc79c;
+      }
+
+      #eventsPanel h2 {
+        margin-bottom: 8px;
+      }
+
+      .events-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 14px;
+      }
+
+      .event-card {
+        border: 1px solid #9ec2ff;
+        border-radius: 14px;
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.95), rgba(227, 240, 255, 0.88));
+        padding: 14px;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+      }
+
+      .event-card h3 {
+        margin: 0 0 10px;
+        color: #1e4f9d;
+      }
+
+      .event-card p {
+        margin: 0;
+        line-height: 1.45;
+        color: #21395f;
+      }
+
+      .event-countdown {
+        margin-top: 12px;
         padding: 10px;
-        margin-bottom: 12px;
-        display: none;
+        border-radius: 10px;
+        background: rgba(31, 81, 162, 0.12);
+        color: #0d3a85;
+        font-weight: 700;
+        animation: pulseCountdown 1.4s ease-in-out infinite;
+      }
+
+      @keyframes pulseCountdown {
+        0%,
+        100% {
+          transform: scale(1);
+          box-shadow: 0 0 0 rgba(52, 117, 216, 0.15);
+        }
+        50% {
+          transform: scale(1.03);
+          box-shadow: 0 0 14px rgba(52, 117, 216, 0.3);
+        }
       }
 
       #dashboard {
         display: none;
+        padding: 24px;
       }
 
       .stat-list {
@@ -104,64 +242,88 @@
         border-bottom: 1px solid #ddd;
         padding: 6px 0;
       }
-
-      .small {
-        color: #666;
-        font-size: 13px;
-      }
     </style>
   </head>
   <body>
     <div class="container" id="authApp">
-      <h1>PlaySculpt</h1>
-      <p class="small">Sign up or log in to access your dashboard.</p>
+      <canvas id="cityCanvas" aria-hidden="true"></canvas>
+      <div class="auth-overlay">
+        <h1 class="brand-title">Playsculpt</h1>
+        <p class="small">Sign up or log in to access your dashboard.</p>
 
-      <div id="authError" class="error"></div>
-      <div id="authSuccess" class="success"></div>
+        <div id="authError" class="error"></div>
+        <div id="authSuccess" class="success"></div>
 
-      <div class="tabs">
-        <button id="showLogin" class="active" type="button">Login</button>
-        <button id="showSignup" type="button">Signup</button>
-      </div>
+        <div class="tabs">
+          <button id="showLogin" class="active" type="button">Login</button>
+          <button id="showSignup" type="button">Signup</button>
+          <button id="showEvents" type="button">Events</button>
+        </div>
 
-      <div id="loginPanel" class="form-panel active">
-        <h2>Login</h2>
-        <form id="loginForm">
-          <label for="loginUsername">Username</label>
-          <input id="loginUsername" name="username" maxlength="20" required />
+        <div id="loginPanel" class="form-panel active">
+          <h2>Login</h2>
+          <form id="loginForm">
+            <label for="loginUsername">Username</label>
+            <input id="loginUsername" name="username" maxlength="20" required />
 
-          <label for="loginPassword">Password</label>
-          <input
-            id="loginPassword"
-            name="password"
-            type="password"
-            minlength="8"
-            maxlength="100"
-            required
-          />
+            <label for="loginPassword">Password</label>
+            <input
+              id="loginPassword"
+              name="password"
+              type="password"
+              minlength="8"
+              maxlength="100"
+              required
+            />
 
-          <button class="btn" type="submit">Login</button>
-        </form>
-      </div>
+            <button class="btn" type="submit">Login</button>
+          </form>
+        </div>
 
-      <div id="signupPanel" class="form-panel">
-        <h2>Signup</h2>
-        <form id="signupForm">
-          <label for="signupUsername">Username</label>
-          <input id="signupUsername" name="username" maxlength="20" required />
+        <div id="signupPanel" class="form-panel">
+          <h2>Signup</h2>
+          <form id="signupForm">
+            <label for="signupUsername">Username</label>
+            <input id="signupUsername" name="username" maxlength="20" required />
 
-          <label for="signupPassword">Password</label>
-          <input
-            id="signupPassword"
-            name="password"
-            type="password"
-            minlength="8"
-            maxlength="100"
-            required
-          />
+            <label for="signupPassword">Password</label>
+            <input
+              id="signupPassword"
+              name="password"
+              type="password"
+              minlength="8"
+              maxlength="100"
+              required
+            />
 
-          <button class="btn" type="submit">Create account</button>
-        </form>
+            <button class="btn" type="submit">Create account</button>
+          </form>
+        </div>
+
+        <div id="eventsPanel" class="form-panel">
+          <h2>Upcoming Events</h2>
+          <div class="events-grid">
+            <article class="event-card">
+              <h3>Playsculpt Summer Event</h3>
+              <p>
+                Starts June 1st, 2026! Play games, earn Sun Tokens! Create games, earn Sun Tokens,
+                and get boosted easily! Discover new games and get rewarded! New games rise faster,
+                creators get featured, players earn more than ever. Stay tuned, it starts June 1st!
+              </p>
+              <div class="event-countdown" data-date="2026-06-01T00:00:00Z"></div>
+            </article>
+
+            <article class="event-card">
+              <h3>Playsculpt Grand Opening</h3>
+              <p>
+                Starts April 11th, marking the first day of Playsculpt being online, the grand opening!
+                Enjoy sculpt coins boost for certain actions, and obtain limited time avatar items that
+                might be rare in the future! The sculpt coins boost goes on for 1 week!
+              </p>
+              <div class="event-countdown" data-date="2026-04-11T00:00:00Z"></div>
+            </article>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -180,13 +342,16 @@
       <button id="logoutBtn" class="btn" type="button">Logout</button>
     </div>
 
+    <script src="https://unpkg.com/three@0.164.1/build/three.min.js"></script>
     <script>
       const authApp = document.getElementById('authApp');
       const dashboard = document.getElementById('dashboard');
       const loginPanel = document.getElementById('loginPanel');
       const signupPanel = document.getElementById('signupPanel');
+      const eventsPanel = document.getElementById('eventsPanel');
       const showLoginBtn = document.getElementById('showLogin');
       const showSignupBtn = document.getElementById('showSignup');
+      const showEventsBtn = document.getElementById('showEvents');
       const authError = document.getElementById('authError');
       const authSuccess = document.getElementById('authSuccess');
 
@@ -209,17 +374,47 @@
 
       function togglePanel(panel) {
         clearMessages();
+        loginPanel.classList.remove('active');
+        signupPanel.classList.remove('active');
+        eventsPanel.classList.remove('active');
+
+        showLoginBtn.classList.remove('active');
+        showSignupBtn.classList.remove('active');
+        showEventsBtn.classList.remove('active');
+
         if (panel === 'signup') {
-          loginPanel.classList.remove('active');
           signupPanel.classList.add('active');
-          showLoginBtn.classList.remove('active');
           showSignupBtn.classList.add('active');
+        } else if (panel === 'events') {
+          eventsPanel.classList.add('active');
+          showEventsBtn.classList.add('active');
         } else {
-          signupPanel.classList.remove('active');
           loginPanel.classList.add('active');
-          showSignupBtn.classList.remove('active');
           showLoginBtn.classList.add('active');
         }
+      }
+
+      function updateCountdowns() {
+        const countdowns = document.querySelectorAll('.event-countdown');
+
+        countdowns.forEach((element) => {
+          const targetDate = new Date(element.dataset.date);
+          const now = new Date();
+          const diff = targetDate.getTime() - now.getTime();
+
+          if (diff <= 0) {
+            element.textContent = '🚀 Event is live now!';
+            return;
+          }
+
+          const totalSeconds = Math.floor(diff / 1000);
+          const days = Math.floor(totalSeconds / 86400);
+          const hours = Math.floor((totalSeconds % 86400) / 3600);
+          const minutes = Math.floor((totalSeconds % 3600) / 60);
+          const seconds = totalSeconds % 60;
+
+          element.textContent = `Starts in ${days}d ${hours}h ${minutes}m ${seconds}s`;
+        });
       }
 
       function renderDashboard(user) {
@@ -316,7 +511,88 @@
 
       showLoginBtn.addEventListener('click', () => togglePanel('login'));
       showSignupBtn.addEventListener('click', () => togglePanel('signup'));
+      showEventsBtn.addEventListener('click', () => togglePanel('events'));
 
+      function initCityScene() {
+        if (!window.THREE) {
+          return;
+        }
+
+        const canvas = document.getElementById('cityCanvas');
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color('#8fd2ff');
+
+        const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
+        camera.position.set(0, 10, 30);
+
+        const ambientLight = new THREE.AmbientLight('#ffffff', 0.7);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight('#ffe59d', 1.15);
+        sunLight.position.set(10, 16, 10);
+        scene.add(sunLight);
+
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(150, 90),
+          new THREE.MeshStandardMaterial({ color: '#88b86a', roughness: 0.95 })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        const sun = new THREE.Mesh(
+          new THREE.SphereGeometry(2.2, 24, 24),
+          new THREE.MeshBasicMaterial({ color: '#ffd55f' })
+        );
+        sun.position.set(16, 13, -20);
+        scene.add(sun);
+
+        const cityGroup = new THREE.Group();
+        const buildingPalette = ['#6b86b3', '#7998c8', '#5c79a6', '#89a8d9'];
+
+        for (let i = 0; i < 34; i += 1) {
+          const isHouse = i % 4 === 0;
+          const width = isHouse ? 1.8 + Math.random() * 1.4 : 1.2 + Math.random() * 1.8;
+          const height = isHouse ? 1.6 + Math.random() * 1.8 : 4 + Math.random() * 11;
+          const depth = isHouse ? 1.8 + Math.random() * 1.4 : 1.2 + Math.random() * 1.8;
+          const color = buildingPalette[Math.floor(Math.random() * buildingPalette.length)];
+
+          const building = new THREE.Mesh(
+            new THREE.BoxGeometry(width, height, depth),
+            new THREE.MeshStandardMaterial({ color, roughness: 0.75 })
+          );
+
+          building.position.set((Math.random() - 0.5) * 50, height / 2, (Math.random() - 0.5) * 34);
+          cityGroup.add(building);
+        }
+
+        scene.add(cityGroup);
+
+        function resizeRenderer() {
+          const width = authApp.clientWidth;
+          const height = authApp.clientHeight;
+
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+          renderer.setSize(width, height, false);
+          camera.aspect = width / height;
+          camera.updateProjectionMatrix();
+        }
+
+        function animate() {
+          requestAnimationFrame(animate);
+          cityGroup.rotation.y += 0.0014;
+          sun.position.y = 13 + Math.sin(Date.now() * 0.0007) * 0.4;
+          renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', resizeRenderer);
+        resizeRenderer();
+        animate();
+      }
+
+      updateCountdowns();
+      setInterval(updateCountdowns, 1000);
+      initCityScene();
       checkSession();
     </script>
   </body>
