@@ -40,6 +40,9 @@
               <option value="smile">Smile</option>
               <option value="serious">Serious</option>
               <option value="wink">Wink</option>
+              <option value="grin">Grin</option>
+              <option value="surprised">Surprised</option>
+              <option value="angry">Angry</option>
             </select>
           </label>
           <label>Hat Type
@@ -142,8 +145,8 @@
       character.add(torso);
 
       const head = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.95, 0.95), skinMat);
-      head.position.y = 1.45;
-      character.add(head);
+      head.position.y = 1.12;
+      torso.add(head);
 
       const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.1, 0.45), pantsMat);
       leftLeg.position.set(-0.25, -1.0, 0);
@@ -168,43 +171,49 @@
         new THREE.PlaneGeometry(0.75, 0.75),
         new THREE.MeshBasicMaterial({ map: faceTexture, transparent: true })
       );
-      facePlane.position.set(0, 1.45, 0.48);
-      character.add(facePlane);
+      facePlane.position.set(0, 0, 0.48);
+      head.add(facePlane);
 
       const hatGroup = new THREE.Group();
-      character.add(hatGroup);
+      head.add(hatGroup);
 
       function drawFace() {
         faceCtx.clearRect(0, 0, 256, 256);
         faceCtx.fillStyle = 'rgba(255,255,255,0)';
         faceCtx.fillRect(0, 0, 256, 256);
+        faceCtx.strokeStyle = '#1f1f1f';
         faceCtx.fillStyle = '#1f1f1f';
+        faceCtx.lineWidth = 8;
 
-        if (avatarState.face === 'wink') {
-          faceCtx.beginPath();
-          faceCtx.arc(90, 95, 10, 0, Math.PI * 2);
-          faceCtx.fill();
-          faceCtx.lineWidth = 8;
-          faceCtx.beginPath();
-          faceCtx.moveTo(145, 95);
-          faceCtx.lineTo(178, 95);
-          faceCtx.stroke();
-          faceCtx.beginPath();
-          faceCtx.strokeStyle = '#1f1f1f';
-          faceCtx.lineWidth = 8;
-          faceCtx.arc(130, 155, 34, 0.25, Math.PI - 0.25);
-          faceCtx.stroke();
-        } else {
+        const drawBothEyes = () => {
           faceCtx.beginPath(); faceCtx.arc(90, 95, 10, 0, Math.PI * 2); faceCtx.fill();
           faceCtx.beginPath(); faceCtx.arc(165, 95, 10, 0, Math.PI * 2); faceCtx.fill();
+        };
+
+        if (avatarState.face === 'wink') {
+          faceCtx.beginPath(); faceCtx.arc(90, 95, 10, 0, Math.PI * 2); faceCtx.fill();
+          faceCtx.beginPath(); faceCtx.moveTo(145, 95); faceCtx.lineTo(178, 95); faceCtx.stroke();
+          faceCtx.beginPath(); faceCtx.arc(130, 155, 34, 0.25, Math.PI - 0.25); faceCtx.stroke();
+        } else if (avatarState.face === 'serious') {
+          drawBothEyes();
+          faceCtx.beginPath(); faceCtx.moveTo(90, 155); faceCtx.lineTo(170, 155); faceCtx.stroke();
+        } else if (avatarState.face === 'grin') {
+          drawBothEyes();
+          faceCtx.beginPath(); faceCtx.arc(130, 142, 38, 0.15, Math.PI - 0.15); faceCtx.stroke();
+          faceCtx.beginPath(); faceCtx.moveTo(98, 152); faceCtx.lineTo(162, 152); faceCtx.stroke();
+        } else if (avatarState.face === 'surprised') {
+          drawBothEyes();
+          faceCtx.beginPath(); faceCtx.arc(130, 155, 18, 0, Math.PI * 2); faceCtx.stroke();
+        } else if (avatarState.face === 'angry') {
+          drawBothEyes();
+          faceCtx.lineWidth = 6;
+          faceCtx.beginPath(); faceCtx.moveTo(72, 78); faceCtx.lineTo(102, 66); faceCtx.stroke();
+          faceCtx.beginPath(); faceCtx.moveTo(152, 66); faceCtx.lineTo(182, 78); faceCtx.stroke();
           faceCtx.lineWidth = 8;
-          faceCtx.beginPath();
-          if (avatarState.face === 'serious') {
-            faceCtx.moveTo(90, 155); faceCtx.lineTo(170, 155);
-          } else {
-            faceCtx.arc(130, 145, 34, 0.20, Math.PI - 0.20);
-          }
-          faceCtx.stroke();
+          faceCtx.beginPath(); faceCtx.moveTo(95, 162); faceCtx.lineTo(165, 150); faceCtx.stroke();
+        } else {
+          drawBothEyes();
+          faceCtx.beginPath(); faceCtx.arc(130, 145, 34, 0.2, Math.PI - 0.2); faceCtx.stroke();
         }
 
         faceTexture.needsUpdate = true;
@@ -216,19 +225,19 @@
 
         if (avatarState.hatType === 'cap') {
           const top = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.18, 24), hatMat);
-          top.position.set(0, 2.05, 0);
+          top.position.set(0, 0.62, 0);
           hatGroup.add(top);
           const brim = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.07, 0.38), hatMat);
-          brim.position.set(0, 1.98, 0.44);
+          brim.position.set(0, 0.55, 0.44);
           hatGroup.add(brim);
         } else if (avatarState.hatType === 'crown') {
           const base = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.17, 24), hatMat);
-          base.position.set(0, 2.02, 0);
+          base.position.set(0, 0.60, 0);
           hatGroup.add(base);
           for (let i = 0; i < 6; i += 1) {
             const spike = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.28, 8), hatMat);
             const angle = (i / 6) * Math.PI * 2;
-            spike.position.set(Math.cos(angle) * 0.45, 2.25, Math.sin(angle) * 0.45);
+            spike.position.set(Math.cos(angle) * 0.45, 0.82, Math.sin(angle) * 0.45);
             hatGroup.add(spike);
           }
         }

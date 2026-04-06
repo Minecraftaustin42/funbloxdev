@@ -6,18 +6,23 @@
     <title>PlaySculpt Groups</title>
     <style>
       body { margin: 0; font-family: Verdana, sans-serif; background: #d7e4fb; color: #1f2d46; }
-      .wrap { max-width: 1150px; margin: 0 auto; padding: 16px; }
-      .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+      .wrap { max-width: 1200px; margin: 0 auto; padding: 16px; }
+      .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
       .btn { border: 1px solid #2e5cb0; background: linear-gradient(#75a0ef, #4f7fd9); color: #fff; padding: 8px 12px; cursor: pointer; border-radius: 3px; }
-      .grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: 12px; }
+      .grid { display: grid; grid-template-columns: 330px 1fr; gap: 12px; }
       .card { background: #f8fbff; border: 1px solid #97add7; border-radius: 4px; padding: 12px; }
+      .card + .card { min-height: 640px; }
       input, textarea, select { width: 100%; box-sizing: border-box; margin-top: 4px; margin-bottom: 10px; border: 1px solid #9db2dc; border-radius: 3px; padding: 8px; }
-      .group-row { border: 1px solid #d8e4fa; background: #fff; padding: 10px; border-radius: 4px; margin-bottom: 8px; }
+      .group-row { border: 1px solid #d8e4fa; background: #fff; padding: 10px; border-radius: 4px; margin-bottom: 8px; transition: background 0.2s, border-color 0.2s; }
+      .group-row:hover { background: #f1f6ff; }
+      .group-row.active { border-color: #4f7fd9; background: #e8f1ff; }
       .muted { color: #4f5f7e; font-size: 13px; }
-      .members { max-height: 280px; overflow: auto; }
+      .members { max-height: 280px; overflow: auto; padding-right: 4px; }
       .error { color: #8f1f1f; }
       .role-grid { display: grid; grid-template-columns: repeat(2, minmax(140px, 1fr)); gap: 6px; }
-      @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+      .toolbar { display: grid; gap: 8px; margin-bottom: 10px; }
+      .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid #acc2eb; background: #edf4ff; }
+      @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .card + .card { min-height: unset; } }
     </style>
   </head>
   <body>
@@ -35,12 +40,15 @@
 
       <div class="grid">
         <section class="card">
-          <h3 style="margin-top: 0">Create Group (100 Sculpt coins)</h3>
-          <label>Name<input id="createName" maxlength="50" /></label>
-          <label>Description<textarea id="createDescription" maxlength="500"></textarea></label>
+          <h3 style="margin-top: 0">Create Group <span class="pill">100 Sculpt coins</span></h3>
+          <label>Name<input id="createName" maxlength="50" placeholder="Enter a memorable group name" /></label>
+          <label>Description<textarea id="createDescription" maxlength="500" placeholder="Tell players what your group is about"></textarea></label>
           <button class="btn" id="createBtn" type="button">Create Group</button>
 
-          <h3>All Groups</h3>
+          <h3 style="margin-bottom: 6px">All Groups</h3>
+          <div class="toolbar">
+            <label style="margin:0">Quick Filter<input id="groupSearch" placeholder="Type to filter groups..." /></label>
+          </div>
           <div id="groupsList"></div>
         </section>
 
@@ -93,6 +101,7 @@
       function renderGroups() {
         const root = document.getElementById('groupsList');
         root.innerHTML = '';
+        const searchText = (document.getElementById('groupSearch')?.value || '').trim().toLowerCase();
 
         if (!Array.isArray(groupsCache) || groupsCache.length === 0) {
           root.innerHTML = '<div class="muted">No groups</div>';
@@ -100,9 +109,12 @@
           return;
         }
 
-        groupsCache.forEach((group) => {
+        groupsCache.filter((group) => {
+          if (!searchText) return true;
+          return String(group.name || '').toLowerCase().includes(searchText) || String(group.description || '').toLowerCase().includes(searchText) || String(group.ownerUsername || '').toLowerCase().includes(searchText);
+        }).forEach((group) => {
           const row = document.createElement('div');
-          row.className = 'group-row';
+          row.className = `group-row${group.id === selectedGroupId ? ' active' : ''}`;
           row.innerHTML = `
             <div><strong>${group.name || 'Untitled Group'}</strong></div>
             <div class="muted">Owner: ${group.ownerUsername || 'Unknown'} • Members: ${group.memberCount ?? 0}</div>
@@ -302,6 +314,7 @@
         const data = await fetchJSON(`/groups/${encodeURIComponent(groupId)}`);
         if (!data || !data.group) return;
         selectedGroupId = groupId;
+        renderGroups();
         renderGroupPage(data.group);
       }
 
@@ -332,6 +345,7 @@
       }
 
       document.getElementById('createBtn').addEventListener('click', createGroup);
+      document.getElementById('groupSearch').addEventListener('input', renderGroups);
       document.getElementById('refreshBtn').addEventListener('click', async () => {
         setError('');
         await loadGroups().catch((error) => setError(error.message));
