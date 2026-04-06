@@ -14,6 +14,7 @@ const NOTIFICATIONS_FILE = path.join(__dirname, 'notifications.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 const GROUPS_FILE = path.join(__dirname, 'groups.json');
 const GAMES_FILE = path.join(__dirname, 'games.json');
+const SCULPT_CITY_FILE = path.join(__dirname, 'sculpt-city.json');
 
 const MAX_MESSAGE_LENGTH = 600;
 const MAX_BIO_LENGTH = 280;
@@ -183,6 +184,88 @@ async function writeGames(games) {
   await writeArrayFile(GAMES_FILE, games);
 }
 
+
+async function readCityData() {
+  try {
+    const raw = await fs.readFile(SCULPT_CITY_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch {}
+
+  const fallback = {
+    plots: {},
+    houses: {},
+    snapshots: {},
+  };
+  await fs.writeFile(SCULPT_CITY_FILE, JSON.stringify(fallback, null, 2), 'utf8');
+  return fallback;
+}
+
+async function writeCityData(data) {
+  const safe = data && typeof data === 'object' ? data : { plots: {}, houses: {}, snapshots: {} };
+  safe.plots = safe.plots && typeof safe.plots === 'object' ? safe.plots : {};
+  safe.houses = safe.houses && typeof safe.houses === 'object' ? safe.houses : {};
+  safe.snapshots = safe.snapshots && typeof safe.snapshots === 'object' ? safe.snapshots : {};
+  await fs.writeFile(SCULPT_CITY_FILE, JSON.stringify(safe, null, 2), 'utf8');
+}
+
+function hashStringNumber(value) {
+  const text = String(value || '');
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash << 5) - hash + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function createPlotForUser(userId) {
+  const index = hashStringNumber(userId) % 64;
+  const gridX = index % 8;
+  const gridZ = Math.floor(index / 8);
+  const spacing = 32;
+  return {
+    x: (gridX - 3.5) * spacing,
+    z: (gridZ - 3.5) * spacing,
+    width: 20,
+    depth: 20,
+  };
+}
+
+function createHouseForUser(user) {
+  const seed = hashStringNumber(user?.id || user?.username || 'house');
+  const hue = seed % 360;
+  return {
+    wallColor: `hsl(${hue}, 38%, 82%)`,
+    roofColor: `hsl(${(hue + 18) % 360}, 45%, 42%)`,
+    doorColor: '#6b4428',
+    windowColor: '#cce8ff',
+    treeColor: '#3a8f43',
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function toCityPlayer(user, snapshot) {
+  const clean = ensureUserShape(user);
+  const now = Date.now();
+  const base = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  return {
+    userId: clean.id,
+    username: clean.username,
+    avatar: clean.avatar,
+    position: {
+      x: Number.isFinite(base?.position?.x) ? base.position.x : 0,
+      y: Number.isFinite(base?.position?.y) ? base.position.y : 1.1,
+      z: Number.isFinite(base?.position?.z) ? base.position.z : 0,
+    },
+    rotationY: Number.isFinite(base.rotationY) ? base.rotationY : 0,
+    status: typeof base.status === 'string' ? base.status : '',
+    chatBubble: typeof base.chatBubble === 'string' ? base.chatBubble : '',
+    bubbleAt: typeof base.bubbleAt === 'string' ? base.bubbleAt : null,
+    updatedAt: typeof base.updatedAt === 'string' ? base.updatedAt : new Date(now).toISOString(),
+  };
+}
+
 function normalizeHexColor(value, fallback) {
   if (typeof value !== 'string') {
     return fallback;
@@ -248,7 +331,7 @@ function sanitizeAvatar(avatar) {
     skinColor: normalizeHexColor(source.skinColor, '#f1c27d'),
     shirt: normalizeHexColor(source.shirt, '#4f7fd9'),
     pants: normalizeHexColor(source.pants, '#2f4f8e'),
-    face: ['smile', 'serious', 'wink'].includes(source.face) ? source.face : 'smile',
+    face: ['smile', 'serious', 'wink', 'grin', 'surprised', 'angry'].includes(source.face) ? source.face : 'smile',
     hatType: ['none', 'cap', 'crown'].includes(source.hatType) ? source.hatType : 'none',
     hat: normalizeHexColor(source.hat, '#303030'),
   };
@@ -1915,6 +1998,99 @@ app.get('/api/chat/history/:username', requireAuth, async (req, res) => {
   }
 });
 
+
+
+app.get('/api/city/bootstrap', requireAuth, async (req, res) => {
+  try {
+    const users = await readUsers();
+    const cityData = await readCityData();
+    const currentUser = users.find((user) => user.id === req.session.userId);
+
+    if (!currentUser) return res.status(401).json({ error: 'Session invalid.' });
+
+    if (!cityData.plots[currentUser.id]) cityData.plots[currentUser.id] = createPlotForUser(currentUser.id);
+    if (!cityData.houses[currentUser.id]) cityData.houses[currentUser.id] = createHouseForUser(currentUser);
+
+    const players = users.map((user) => toCityPlayer(user, cityData.snapshots[user.id]));
+
+    await writeCityData(cityData);
+
+    return res.json({
+      world: {
+        cityName: 'Sculpt City',
+        plots: cityData.plots,
+        houses: cityData.houses,
+      },
+      me: toCityPlayer(currentUser, cityData.snapshots[currentUser.id]),
+      players,
+      serverTime: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('City bootstrap error:', error);
+    return res.status(500).json({ error: 'Server error while loading Sculpt City.' });
+  }
+});
+
+app.get('/api/city/players', requireAuth, async (req, res) => {
+  try {
+    const users = await readUsers();
+    const cityData = await readCityData();
+    const players = users.map((user) => toCityPlayer(user, cityData.snapshots[user.id]));
+    return res.json({ players, serverTime: new Date().toISOString() });
+  } catch (error) {
+    console.error('City players error:', error);
+    return res.status(500).json({ error: 'Server error while syncing city players.' });
+  }
+});
+
+app.post('/api/city/sync', requireAuth, async (req, res) => {
+  try {
+    const { position, rotationY, status } = req.body || {};
+    const cityData = await readCityData();
+    const now = new Date().toISOString();
+
+    cityData.snapshots[req.session.userId] = {
+      ...(cityData.snapshots[req.session.userId] || {}),
+      position: {
+        x: Number.isFinite(position?.x) ? position.x : 0,
+        y: Number.isFinite(position?.y) ? position.y : 1.1,
+        z: Number.isFinite(position?.z) ? position.z : 0,
+      },
+      rotationY: Number.isFinite(rotationY) ? rotationY : 0,
+      status: typeof status === 'string' ? status.slice(0, 60) : '',
+      updatedAt: now,
+    };
+
+    await writeCityData(cityData);
+    return res.json({ ok: true, updatedAt: now });
+  } catch (error) {
+    console.error('City sync error:', error);
+    return res.status(500).json({ error: 'Server error while syncing player position.' });
+  }
+});
+
+app.post('/api/city/chat-bubble', requireAuth, async (req, res) => {
+  try {
+    const { text } = req.body || {};
+    const bubble = typeof text === 'string' ? text.trim().slice(0, 80) : '';
+    if (!bubble) return res.status(400).json({ error: 'Bubble text is required.' });
+
+    const cityData = await readCityData();
+    cityData.snapshots[req.session.userId] = {
+      ...(cityData.snapshots[req.session.userId] || {}),
+      chatBubble: bubble,
+      bubbleAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await writeCityData(cityData);
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error('City chat bubble error:', error);
+    return res.status(500).json({ error: 'Server error while posting chat bubble.' });
+  }
+});
+
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found.' });
 });
@@ -1955,6 +2131,32 @@ io.on('connection', (socket) => {
   const userRoom = `user:${userId}`;
 
   socket.join(userRoom);
+
+  socket.on('city:sync-placeholder', (payload, callback) => {
+    const safePayload = payload && typeof payload === 'object' ? payload : {};
+    socket.broadcast.emit('city:player-placeholder', {
+      userId,
+      position: safePayload.position || { x: 0, y: 1.1, z: 0 },
+      rotationY: Number.isFinite(safePayload.rotationY) ? safePayload.rotationY : 0,
+      updatedAt: new Date().toISOString(),
+    });
+    callback?.({ ok: true });
+  });
+
+  socket.on('city:bubble-placeholder', (payload, callback) => {
+    const text = typeof payload?.text === 'string' ? payload.text.trim().slice(0, 80) : '';
+    if (!text) {
+      callback?.({ ok: false, error: 'Bubble text required.' });
+      return;
+    }
+
+    socket.broadcast.emit('city:bubble-placeholder', {
+      userId,
+      text,
+      bubbleAt: new Date().toISOString(),
+    });
+    callback?.({ ok: true });
+  });
 
   socket.on('chat:send', async (payload, callback) => {
     try {

@@ -121,6 +121,7 @@
         dragStart: null,
         draftKey: 'playsculpt.studio.draft',
         transformAxis: '',
+        activeHandle: null,
       };
 
       const objects = [];
@@ -243,6 +244,10 @@
         transformGizmo.position.copy(selected.position);
         transformGizmo.rotation.set(0, selected.rotation.y, 0);
         transformGizmo.scale.setScalar(Math.max(0.7, camera.position.distanceTo(selected.position) * 0.12));
+        transformGizmo.children.forEach((child) => {
+          const mode = child.userData?.mode || '';
+          child.visible = state.activeTool !== 'select' && mode === state.activeTool;
+        });
       }
 
       function selectObject(id) {
@@ -454,23 +459,27 @@
           line.position.copy(dir.clone().multiplyScalar(0.6));
           if (axis === 'x') line.rotation.z = -Math.PI / 2;
           if (axis === 'z') line.rotation.x = Math.PI / 2;
+          line.userData.mode = 'move';
           transformGizmo.add(line);
 
           const handle = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.16), new THREE.MeshBasicMaterial({ color }));
           handle.position.copy(dir.clone().multiplyScalar(1.25));
+          handle.userData.mode = 'move';
           transformGizmo.add(handle);
-          handleMap.set(handle, { type: 'move', axis });
+          handleMap.set(handle, { type: 'move', axis, direction: 1 });
 
           const scaleHandle = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), new THREE.MeshBasicMaterial({ color: color + 0x222222 }));
           scaleHandle.position.copy(dir.clone().multiplyScalar(1.65));
+          scaleHandle.userData.mode = 'scale';
           transformGizmo.add(scaleHandle);
-          handleMap.set(scaleHandle, { type: 'scale', axis });
+          handleMap.set(scaleHandle, { type: 'scale', axis, direction: 1 });
         });
 
         const rotateY = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.04, 12, 60), new THREE.MeshBasicMaterial({ color: 0xf3d34a }));
         rotateY.rotation.x = Math.PI / 2;
+        rotateY.userData.mode = 'rotate';
         transformGizmo.add(rotateY);
-        handleMap.set(rotateY, { type: 'rotate', axis: 'y' });
+        handleMap.set(rotateY, { type: 'rotate', axis: 'y', direction: 1 });
       }
 
       function applyTransformFromDrag(selected, dx, dy) {
@@ -478,22 +487,29 @@
 
         if (state.activeTool === 'move') {
           const increment = getMoveIncrement();
-          const step = quantize((dx + dy) * 0.02, increment);
+          const step = quantize((dx + dy) * 0.04, increment);
           const target = selected.position.clone();
           target[state.transformAxis] += step;
           moveWithCollision(selected, target);
         } else if (state.activeTool === 'scale') {
           const increment = getScaleIncrement();
-          const delta = quantize((dx - dy) * 0.01, increment);
+          const delta = quantize((dx - dy) * 0.02, increment);
           const axis = state.transformAxis;
-          const next = Math.max(0.2, quantize(selected.scale[axis] + delta, increment));
+          const direction = state.activeHandle?.direction || 1;
+          const previousScale = selected.scale[axis];
+          const next = Math.max(0.2, quantize(previousScale + delta, increment));
+          const appliedDelta = next - previousScale;
           selected.scale[axis] = next;
+          selected.position[axis] += (appliedDelta * direction) / 2;
           const minY = tempBox.setFromObject(selected).getSize(tempVec).y * 0.5;
           selected.position.y = Math.max(minY, selected.position.y);
-          if (collidesWithOthers(selected)) selected.scale[axis] = Math.max(0.2, selected.userData.startScale[axis]);
+          if (collidesWithOthers(selected)) {
+            selected.scale[axis] = previousScale;
+            selected.position[axis] -= (appliedDelta * direction) / 2;
+          }
         } else if (state.activeTool === 'rotate') {
           const increment = getRotateIncrementRad();
-          const delta = quantize((dx - dy) * 0.01, increment);
+          const delta = quantize((dx - dy) * 0.02, increment);
           selected.rotation[state.transformAxis] = quantize(selected.rotation[state.transformAxis] + delta, increment);
         }
       }
@@ -543,6 +559,7 @@
             const expectedType = state.activeTool;
             if (handle.type === expectedType || (expectedType === 'rotate' && handle.type === 'rotate')) {
               state.transformAxis = handle.axis;
+              state.activeHandle = handle;
               state.dragging = true;
               state.dragStart = { x: event.clientX, y: event.clientY };
               controls.enabled = false;
@@ -569,6 +586,7 @@
           state.dragging = false;
           state.dragStart = null;
           state.transformAxis = '';
+          state.activeHandle = null;
           controls.enabled = true;
         });
 
