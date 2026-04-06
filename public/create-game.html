@@ -6,16 +6,19 @@
     <title>Create Game - PlaySculpt Studio</title>
     <style>
       body { margin: 0; font-family: Verdana, sans-serif; background: #dce8ff; color: #1f2d46; }
-      .wrap { max-width: 1300px; margin: 0 auto; padding: 12px; }
-      .layout { display: grid; grid-template-columns: 340px 1fr; gap: 12px; }
+      .wrap { max-width: 1360px; margin: 0 auto; padding: 12px; }
+      .layout { display: grid; grid-template-columns: 360px 1fr; gap: 12px; }
       .card { background:#f8fbff; border:1px solid #97add7; border-radius:4px; padding: 12px; }
-      .btn { border:1px solid #2e5cb0; background:linear-gradient(#75a0ef,#4f7fd9); color:#fff; padding:8px 12px; cursor:pointer; margin-right:6px; margin-bottom:6px; }
+      .btn { border:1px solid #2e5cb0; background:linear-gradient(#75a0ef,#4f7fd9); color:#fff; padding:8px 12px; cursor:pointer; margin-right:6px; margin-bottom:6px; border-radius:3px; }
+      .btn[data-active="true"] { box-shadow: inset 0 0 0 2px #ffffff; filter: saturate(1.2); }
       input, textarea, select { width:100%; box-sizing:border-box; border:1px solid #9db2dc; border-radius:3px; padding:8px; margin-top:4px; margin-bottom:8px; }
       textarea { min-height: 80px; }
-      #studio { width:100%; height:680px; border:1px solid #9db2dc; background:#d1e1ff; }
+      #studio { width:100%; height:700px; border:1px solid #9db2dc; background:#d1e1ff; }
       .tool-grid { display:grid; grid-template-columns: repeat(2,minmax(100px,1fr)); gap:6px; }
+      .increment-grid { display:grid; grid-template-columns:repeat(2,minmax(100px,1fr)); gap:8px; }
       .muted { color:#526188; font-size:13px; }
-      @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } #studio { height: 460px; } }
+      .legend { margin-top:6px; border:1px solid #ceddfa; background:#eff5ff; padding:8px; border-radius:4px; }
+      @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } #studio { height: 500px; } }
     </style>
   </head>
   <body>
@@ -37,10 +40,17 @@
 
           <h3>Studio Tools</h3>
           <div class="tool-grid">
-            <button class="btn" type="button" data-tool="select">Select</button>
-            <button class="btn" type="button" data-tool="move">Move</button>
-            <button class="btn" type="button" data-tool="rotate">Rotate</button>
-            <button class="btn" type="button" data-tool="scale">Scale</button>
+            <button class="btn" type="button" data-tool="select">Select (1)</button>
+            <button class="btn" type="button" data-tool="move">Move (2)</button>
+            <button class="btn" type="button" data-tool="scale">Scale (3)</button>
+            <button class="btn" type="button" data-tool="rotate">Rotate (4)</button>
+          </div>
+
+          <div class="increment-grid">
+            <label>Move Increment<input id="moveIncrementInput" type="number" min="0.05" step="0.05" value="0.25" /></label>
+            <label>Scale Increment<input id="scaleIncrementInput" type="number" min="0.05" step="0.05" value="0.1" /></label>
+            <label>Rotate Increment (°)<input id="rotateIncrementInput" type="number" min="1" step="1" value="15" /></label>
+            <label>Select Drag Height<input id="selectHeightInput" type="number" min="0.1" step="0.1" value="0.5" /></label>
           </div>
 
           <label>Primitive
@@ -71,7 +81,12 @@
           <button class="btn" id="saveDraftBtn" type="button">Save Draft (Local)</button>
           <button class="btn" id="loadDraftBtn" type="button">Load Draft (Local)</button>
 
-          <p class="muted">Controls: click object to select. Drag mouse on studio to edit using selected tool. No grid is used.</p>
+          <div class="legend muted">
+            <div><strong>Editor Help</strong></div>
+            <div>• Drag selected block in Select mode with collisions and no clipping.</div>
+            <div>• Move/Scale/Rotate use custom on-screen handles (no external transform controls).</div>
+            <div>• Keybinds: 1 Select, 2 Move, 3 Scale, 4 Rotate.</div>
+          </div>
 
           <button class="btn" id="saveGameBtn" type="button">Save Game</button>
         </section>
@@ -105,9 +120,15 @@
         dragging: false,
         dragStart: null,
         draftKey: 'playsculpt.studio.draft',
+        transformAxis: '',
+        activeHandle: null,
       };
 
       const objects = [];
+      const tempBox = new THREE.Box3();
+      const tempBox2 = new THREE.Box3();
+      const tempVec = new THREE.Vector3();
+      const worldUp = new THREE.Vector3(0, 1, 0);
       let camera;
       let scene;
       let renderer;
@@ -116,6 +137,10 @@
       let pointer;
       let ambient;
       let sun;
+      let ground;
+      let selectionHelper;
+      let transformGizmo;
+      const handleMap = new Map();
 
       const studio = document.getElementById('studio');
       const errorBox = document.getElementById('errorBox');
@@ -139,9 +164,31 @@
         document.getElementById('objectCount').textContent = objects.length;
       }
 
+      function getMoveIncrement() {
+        return Math.max(0.05, Number(document.getElementById('moveIncrementInput').value) || 0.25);
+      }
+
+      function getScaleIncrement() {
+        return Math.max(0.05, Number(document.getElementById('scaleIncrementInput').value) || 0.1);
+      }
+
+      function getRotateIncrementRad() {
+        const degrees = Math.max(1, Number(document.getElementById('rotateIncrementInput').value) || 15);
+        return THREE.MathUtils.degToRad(degrees);
+      }
+
+      function getSelectHeight() {
+        return Math.max(0.1, Number(document.getElementById('selectHeightInput').value) || 0.5);
+      }
+
       function setTool(tool) {
         state.activeTool = tool;
+        state.transformAxis = '';
         document.getElementById('activeToolText').textContent = tool;
+        document.querySelectorAll('[data-tool]').forEach((btn) => {
+          btn.dataset.active = String(btn.dataset.tool === tool);
+        });
+        updateSelectionVisuals();
       }
 
       function createGeometry(type) {
@@ -150,6 +197,10 @@
         if (type === 'cone') return new THREE.ConeGeometry(0.5, 1, 20);
         if (type === 'torus') return new THREE.TorusGeometry(0.4, 0.16, 16, 40);
         return new THREE.BoxGeometry(1, 1, 1);
+      }
+
+      function quantize(value, increment) {
+        return Math.round(value / increment) * increment;
       }
 
       function addObject(payload = null) {
@@ -163,32 +214,102 @@
         mesh.scale.set(payload?.scale?.x || 1, payload?.scale?.y || 1, payload?.scale?.z || 1);
 
         const id = payload?.id || `obj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        mesh.userData = { id, primitive };
+        mesh.userData = { id, primitive, startPosition: mesh.position.clone(), startScale: mesh.scale.clone(), startRotation: mesh.rotation.clone() };
         scene.add(mesh);
         objects.push(mesh);
         selectObject(id);
         updateObjectCount();
       }
 
-      function selectObject(id) {
-        state.selectedId = id || '';
-        objects.forEach((mesh) => {
-          mesh.material.emissive = mesh.material.emissive || new THREE.Color(0x000000);
-          mesh.material.emissive.set(mesh.userData.id === state.selectedId ? 0x203860 : 0x000000);
-        });
-      }
-
       function getSelectedObject() {
         return objects.find((item) => item.userData.id === state.selectedId) || null;
       }
 
-      function pickObject(clientX, clientY) {
+      function updateSelectionVisuals() {
+        const selected = getSelectedObject();
+        objects.forEach((mesh) => {
+          mesh.material.emissive = mesh.material.emissive || new THREE.Color(0x000000);
+          mesh.material.emissive.set(mesh.userData.id === state.selectedId ? 0x203860 : 0x000000);
+        });
+
+        if (!selected) {
+          selectionHelper.visible = false;
+          transformGizmo.visible = false;
+          return;
+        }
+
+        selectionHelper.visible = true;
+        selectionHelper.setFromObject(selected);
+        transformGizmo.visible = state.activeTool !== 'select';
+        transformGizmo.position.copy(selected.position);
+        transformGizmo.rotation.set(0, selected.rotation.y, 0);
+        transformGizmo.scale.setScalar(Math.max(0.7, camera.position.distanceTo(selected.position) * 0.12));
+        transformGizmo.children.forEach((child) => {
+          const mode = child.userData?.mode || '';
+          child.visible = state.activeTool !== 'select' && mode === state.activeTool;
+        });
+      }
+
+      function selectObject(id) {
+        state.selectedId = id || '';
+        updateSelectionVisuals();
+      }
+
+      function pointerToNdc(clientX, clientY) {
         const rect = renderer.domElement.getBoundingClientRect();
         pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
         pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      }
+
+      function pickObject(clientX, clientY) {
+        pointerToNdc(clientX, clientY);
         raycaster.setFromCamera(pointer, camera);
         const hit = raycaster.intersectObjects(objects, false)[0];
         return hit ? hit.object : null;
+      }
+
+      function pickHandle(clientX, clientY) {
+        if (!transformGizmo.visible) return null;
+        pointerToNdc(clientX, clientY);
+        raycaster.setFromCamera(pointer, camera);
+        const hits = raycaster.intersectObjects([...handleMap.keys()], false);
+        const hit = hits.find((entry) => handleMap.has(entry.object));
+        return hit ? handleMap.get(hit.object) : null;
+      }
+
+      function collidesWithOthers(mesh) {
+        tempBox.setFromObject(mesh);
+        for (const other of objects) {
+          if (other === mesh) continue;
+          tempBox2.setFromObject(other);
+          if (tempBox.intersectsBox(tempBox2)) return true;
+        }
+        return false;
+      }
+
+      function moveWithCollision(mesh, targetPosition) {
+        const original = mesh.position.clone();
+        const minY = tempBox.setFromObject(mesh).getSize(tempVec).y * 0.5;
+        mesh.position.y = Math.max(minY, targetPosition.y);
+
+        mesh.position.x = targetPosition.x;
+        if (collidesWithOthers(mesh)) mesh.position.x = original.x;
+
+        mesh.position.z = targetPosition.z;
+        if (collidesWithOthers(mesh)) mesh.position.z = original.z;
+
+        if (mesh.position.y !== original.y && collidesWithOthers(mesh)) {
+          mesh.position.y = original.y;
+        }
+      }
+
+      function planeDragTarget(clientX, clientY, yLevel) {
+        pointerToNdc(clientX, clientY);
+        raycaster.setFromCamera(pointer, camera);
+        const dragPlane = new THREE.Plane(worldUp, -yLevel);
+        const hitPoint = new THREE.Vector3();
+        const hasHit = raycaster.ray.intersectPlane(dragPlane, hitPoint);
+        return hasHit ? hitPoint : null;
       }
 
       function deleteSelected() {
@@ -250,6 +371,7 @@
           const t = (index / Math.max(1, objects.length)) * Math.PI * 2;
           mesh.position.set(Math.cos(t) * radius, 0.5, Math.sin(t) * radius);
         });
+        updateSelectionVisuals();
       }
 
       function serializeScene() {
@@ -321,6 +443,77 @@
         loadScene(result.game.studioState || { objects: [] });
       }
 
+      function buildTransformGizmo() {
+        transformGizmo = new THREE.Group();
+        transformGizmo.visible = false;
+        scene.add(transformGizmo);
+
+        const axes = [
+          { axis: 'x', color: 0xff5a5a, dir: new THREE.Vector3(1, 0, 0) },
+          { axis: 'y', color: 0x53e27e, dir: new THREE.Vector3(0, 1, 0) },
+          { axis: 'z', color: 0x5a7dff, dir: new THREE.Vector3(0, 0, 1) },
+        ];
+
+        axes.forEach(({ axis, color, dir }) => {
+          const line = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.2, 12), new THREE.MeshBasicMaterial({ color }));
+          line.position.copy(dir.clone().multiplyScalar(0.6));
+          if (axis === 'x') line.rotation.z = -Math.PI / 2;
+          if (axis === 'z') line.rotation.x = Math.PI / 2;
+          line.userData.mode = 'move';
+          transformGizmo.add(line);
+
+          const handle = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.16), new THREE.MeshBasicMaterial({ color }));
+          handle.position.copy(dir.clone().multiplyScalar(1.25));
+          handle.userData.mode = 'move';
+          transformGizmo.add(handle);
+          handleMap.set(handle, { type: 'move', axis, direction: 1 });
+
+          const scaleHandle = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), new THREE.MeshBasicMaterial({ color: color + 0x222222 }));
+          scaleHandle.position.copy(dir.clone().multiplyScalar(1.65));
+          scaleHandle.userData.mode = 'scale';
+          transformGizmo.add(scaleHandle);
+          handleMap.set(scaleHandle, { type: 'scale', axis, direction: 1 });
+        });
+
+        const rotateY = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.04, 12, 60), new THREE.MeshBasicMaterial({ color: 0xf3d34a }));
+        rotateY.rotation.x = Math.PI / 2;
+        rotateY.userData.mode = 'rotate';
+        transformGizmo.add(rotateY);
+        handleMap.set(rotateY, { type: 'rotate', axis: 'y', direction: 1 });
+      }
+
+      function applyTransformFromDrag(selected, dx, dy) {
+        if (!selected || !state.transformAxis) return;
+
+        if (state.activeTool === 'move') {
+          const increment = getMoveIncrement();
+          const step = quantize((dx + dy) * 0.04, increment);
+          const target = selected.position.clone();
+          target[state.transformAxis] += step;
+          moveWithCollision(selected, target);
+        } else if (state.activeTool === 'scale') {
+          const increment = getScaleIncrement();
+          const delta = quantize((dx - dy) * 0.02, increment);
+          const axis = state.transformAxis;
+          const direction = state.activeHandle?.direction || 1;
+          const previousScale = selected.scale[axis];
+          const next = Math.max(0.2, quantize(previousScale + delta, increment));
+          const appliedDelta = next - previousScale;
+          selected.scale[axis] = next;
+          selected.position[axis] += (appliedDelta * direction) / 2;
+          const minY = tempBox.setFromObject(selected).getSize(tempVec).y * 0.5;
+          selected.position.y = Math.max(minY, selected.position.y);
+          if (collidesWithOthers(selected)) {
+            selected.scale[axis] = previousScale;
+            selected.position[axis] -= (appliedDelta * direction) / 2;
+          }
+        } else if (state.activeTool === 'rotate') {
+          const increment = getRotateIncrementRad();
+          const delta = quantize((dx - dy) * 0.02, increment);
+          selected.rotation[state.transformAxis] = quantize(selected.rotation[state.transformAxis] + delta, increment);
+        }
+      }
+
       function setupStudio() {
         scene = new THREE.Scene();
         scene.background = new THREE.Color(0xd1e1ff);
@@ -342,7 +535,7 @@
         sun.position.set(6, 10, 4);
         scene.add(sun);
 
-        const ground = new THREE.Mesh(
+        ground = new THREE.Mesh(
           new THREE.PlaneGeometry(60, 60),
           new THREE.MeshStandardMaterial({ color: 0xbfd0ed, roughness: 0.9 })
         );
@@ -350,19 +543,51 @@
         ground.position.y = 0;
         scene.add(ground);
 
+        selectionHelper = new THREE.BoxHelper(new THREE.Mesh(), 0xffe070);
+        selectionHelper.visible = false;
+        scene.add(selectionHelper);
+        buildTransformGizmo();
+
         raycaster = new THREE.Raycaster();
         pointer = new THREE.Vector2();
 
         renderer.domElement.addEventListener('pointerdown', (event) => {
+          const selected = getSelectedObject();
+          const handle = pickHandle(event.clientX, event.clientY);
+
+          if (handle && selected) {
+            const expectedType = state.activeTool;
+            if (handle.type === expectedType || (expectedType === 'rotate' && handle.type === 'rotate')) {
+              state.transformAxis = handle.axis;
+              state.activeHandle = handle;
+              state.dragging = true;
+              state.dragStart = { x: event.clientX, y: event.clientY };
+              controls.enabled = false;
+              selected.userData.startScale.copy(selected.scale);
+              selected.userData.startPosition.copy(selected.position);
+              return;
+            }
+          }
+
           const picked = pickObject(event.clientX, event.clientY);
-          if (picked) selectObject(picked.userData.id);
-          state.dragging = true;
-          state.dragStart = { x: event.clientX, y: event.clientY };
+          if (picked) {
+            selectObject(picked.userData.id);
+            if (state.activeTool === 'select') {
+              state.dragging = true;
+              state.dragStart = { x: event.clientX, y: event.clientY };
+              controls.enabled = false;
+            }
+          } else {
+            selectObject('');
+          }
         });
 
         renderer.domElement.addEventListener('pointerup', () => {
           state.dragging = false;
           state.dragStart = null;
+          state.transformAxis = '';
+          state.activeHandle = null;
+          controls.enabled = true;
         });
 
         renderer.domElement.addEventListener('pointermove', (event) => {
@@ -370,20 +595,23 @@
           const selected = getSelectedObject();
           if (!selected) return;
 
-          const dx = (event.clientX - state.dragStart.x) * 0.01;
-          const dy = (event.clientY - state.dragStart.y) * 0.01;
+          const dx = event.clientX - state.dragStart.x;
+          const dy = event.clientY - state.dragStart.y;
           state.dragStart = { x: event.clientX, y: event.clientY };
 
-          if (state.activeTool === 'move') {
-            selected.position.x += dx;
-            selected.position.z += dy;
-          } else if (state.activeTool === 'rotate') {
-            selected.rotation.y += dx;
-            selected.rotation.x += dy * 0.5;
-          } else if (state.activeTool === 'scale') {
-            const next = Math.max(0.2, selected.scale.x + dx);
-            selected.scale.set(next, Math.max(0.2, selected.scale.y + dy), next);
+          if (state.activeTool === 'select') {
+            const hitPoint = planeDragTarget(event.clientX, event.clientY, getSelectHeight());
+            if (!hitPoint) return;
+            moveWithCollision(selected, new THREE.Vector3(
+              quantize(hitPoint.x, getMoveIncrement()),
+              getSelectHeight(),
+              quantize(hitPoint.z, getMoveIncrement())
+            ));
+          } else {
+            applyTransformFromDrag(selected, dx, dy);
           }
+
+          updateSelectionVisuals();
         });
 
         window.addEventListener('resize', () => {
@@ -397,11 +625,20 @@
       function animate() {
         requestAnimationFrame(animate);
         controls.update();
+        updateSelectionVisuals();
         renderer.render(scene, camera);
       }
 
       document.querySelectorAll('[data-tool]').forEach((button) => {
         button.addEventListener('click', () => setTool(button.dataset.tool || 'select'));
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+        if (event.key === '1') setTool('select');
+        if (event.key === '2') setTool('move');
+        if (event.key === '3') setTool('scale');
+        if (event.key === '4') setTool('rotate');
       });
 
       document.getElementById('addObjectBtn').addEventListener('click', () => addObject());
@@ -443,6 +680,7 @@
         } else {
           addObject();
         }
+        setTool('select');
       }
 
       init().catch((error) => setError(error.message));

@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sculpt City</title>
+    <style>
+      body { margin: 0; font-family: Verdana, sans-serif; background: #bfd7ff; color: #1f2d46; overflow: hidden; }
+      #cityCanvas { width: 100vw; height: 100vh; display: block; }
+      .hud { position: fixed; top: 12px; left: 12px; background: rgba(248, 251, 255, 0.92); border: 1px solid #97add7; border-radius: 6px; padding: 10px; min-width: 280px; z-index: 5; }
+      .hud h3 { margin: 0 0 6px 0; }
+      .muted { font-size: 12px; color: #526188; }
+      .status { margin-top: 6px; font-size: 12px; }
+      .row { display: flex; gap: 6px; margin-top: 8px; }
+      .btn { border: 1px solid #2e5cb0; background: linear-gradient(#75a0ef, #4f7fd9); color: #fff; padding: 6px 10px; cursor: pointer; border-radius: 3px; font-size: 12px; }
+      .chatbox { width: 100%; margin-top: 8px; border: 1px solid #9db2dc; border-radius: 3px; padding: 7px; box-sizing: border-box; }
+      #toast { position: fixed; right: 12px; top: 12px; background: rgba(17,26,42,0.78); color: #fff; padding: 10px 12px; border-radius: 6px; font-size: 12px; z-index: 6; }
+    </style>
+  </head>
+  <body>
+    <canvas id="cityCanvas"></canvas>
+    <div class="hud">
+      <h3>Sculpt City</h3>
+      <div class="muted">WASD to move • Enter to send local bubble • This world persists per user.</div>
+      <div class="status" id="statusText">Connecting...</div>
+      <input id="chatInput" class="chatbox" maxlength="80" placeholder="Say something in a chat bubble..." />
+      <div class="row">
+        <button class="btn" id="bubbleBtn" type="button">Send Bubble</button>
+        <button class="btn" id="studioBtn" type="button">Open Studio</button>
+        <button class="btn" id="dashBtn" type="button">Dashboard</button>
+      </div>
+    </div>
+    <div id="toast">Loading Sculpt City...</div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.162.0/build/three.module.js"
+        }
+      }
+    </script>
+    <script type="module">
+      import * as THREE from 'three';
+
+      const canvas = document.getElementById('cityCanvas');
+      const statusText = document.getElementById('statusText');
+      const chatInput = document.getElementById('chatInput');
+      const bubbleBtn = document.getElementById('bubbleBtn');
+      const toast = document.getElementById('toast');
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x98c5ff);
+      const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1200);
+      camera.position.set(0, 10, 18);
+
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+
+      const hemi = new THREE.HemisphereLight(0xffffff, 0x9dc38f, 0.85);
+      scene.add(hemi);
+      const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+      sun.position.set(20, 24, 14);
+      scene.add(sun);
+
+      const world = {
+        me: null,
+        meUserId: '',
+        players: new Map(),
+        keyState: { w: false, a: false, s: false, d: false },
+        lastSyncAt: 0,
+        syncIntervalMs: 180,
+        lastPollAt: 0,
+        pollIntervalMs: 2000,
+        startedAt: Date.now(),
+        socket: null,
+      };
+
+      function showToast(text) {
+        toast.textContent = text;
+        setTimeout(() => {
+          if (toast.textContent === text) toast.textContent = 'Explore, build, and connect.';
+        }, 2600);
+      }
+
+      function makeTextSprite(text, bg = 'rgba(20,30,52,0.75)', fg = '#ffffff') {
+        const c = document.createElement('canvas');
+        const ctx = c.getContext('2d');
+        c.width = 512;
+        c.height = 128;
+        ctx.fillStyle = bg;
+        ctx.roundRect?.(10, 16, 492, 96, 24);
+        if (!ctx.roundRect) {
+          ctx.fillRect(10, 16, 492, 96);
+        } else {
+          ctx.fill();
+        }
+        ctx.fillStyle = fg;
+        ctx.font = 'bold 42px Verdana';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text.slice(0, 22), 256, 64);
+        const tex = new THREE.CanvasTexture(c);
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+        const sprite = new THREE.Sprite(mat);
+        sprite.scale.set(4.8, 1.2, 1);
+        return sprite;
+      }
+
+      function sanitizeHex(value, fallback) {
+        return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
+      }
+
+      function createAvatarMesh(avatar) {
+        const safeAvatar = avatar && typeof avatar === 'object' ? avatar : {};
+        const skin = sanitizeHex(safeAvatar.skinColor, '#f1c27d');
+        const shirt = sanitizeHex(safeAvatar.shirt, '#4f7fd9');
+        const pants = sanitizeHex(safeAvatar.pants, '#2f4f8e');
+        const hat = sanitizeHex(safeAvatar.hat, '#303030');
+
+        const group = new THREE.Group();
+        const skinMat = new THREE.MeshStandardMaterial({ color: skin });
+        const shirtMat = new THREE.MeshStandardMaterial({ color: shirt });
+        const pantsMat = new THREE.MeshStandardMaterial({ color: pants });
+        const hatMat = new THREE.MeshStandardMaterial({ color: hat });
+
+        const torso = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.3, 0.7), shirtMat);
+        torso.position.y = 0.2;
+        group.add(torso);
+
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.95, 0.95), skinMat);
+        head.position.y = 1.12;
+        torso.add(head);
+
+        const legs = new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.1, 0.45), pantsMat);
+        legs.position.y = -1;
+        group.add(legs);
+
+        const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.05, 0.35), skinMat);
+        leftArm.position.set(-0.8, 0.1, 0);
+        group.add(leftArm);
+        const rightArm = leftArm.clone();
+        rightArm.position.x = 0.8;
+        group.add(rightArm);
+
+        if (safeAvatar.hatType === 'cap' || safeAvatar.hatType === 'crown') {
+          const hatTop = new THREE.Mesh(new THREE.CylinderGeometry(0.54, 0.54, 0.16, 20), hatMat);
+          hatTop.position.set(0, 0.64, 0);
+          head.add(hatTop);
+        }
+
+        return group;
+      }
+
+      function createPlayerEntity(data, isMe = false) {
+        const root = new THREE.Group();
+        const mesh = createAvatarMesh(data.avatar);
+        root.add(mesh);
+        root.position.set(data.position?.x || 0, 1.1, data.position?.z || 0);
+        root.rotation.y = data.rotationY || 0;
+
+        const usernameTag = makeTextSprite(data.username || 'Player', isMe ? 'rgba(20,95,45,0.82)' : 'rgba(20,30,52,0.75)');
+        usernameTag.position.y = 3.2;
+        root.add(usernameTag);
+
+        const bubble = makeTextSprite('', 'rgba(255,255,255,0.85)', '#203250');
+        bubble.visible = false;
+        bubble.position.y = 4.4;
+        root.add(bubble);
+
+        scene.add(root);
+
+        return {
+          userId: data.userId,
+          username: data.username,
+          avatar: data.avatar,
+          root,
+          mesh,
+          usernameTag,
+          bubble,
+          bubbleUntil: 0,
+          target: new THREE.Vector3(root.position.x, root.position.y, root.position.z),
+        };
+      }
+
+      function ensurePlayer(data) {
+        if (!data || !data.userId) return null;
+        if (!world.players.has(data.userId)) {
+          const entity = createPlayerEntity(data, data.userId === world.meUserId);
+          world.players.set(data.userId, entity);
+        }
+        return world.players.get(data.userId);
+      }
+
+      function setBubble(entity, text) {
+        if (!entity) return;
+        entity.root.remove(entity.bubble);
+        entity.bubble.material.map.dispose();
+        entity.bubble.material.dispose();
+        entity.bubble = makeTextSprite(text || '', 'rgba(255,255,255,0.9)', '#12314f');
+        entity.bubble.position.y = 4.4;
+        entity.bubble.visible = Boolean(text);
+        entity.root.add(entity.bubble);
+        entity.bubbleUntil = Date.now() + 7000;
+      }
+
+      function buildGroundAndRoads() {
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(900, 900),
+          new THREE.MeshStandardMaterial({ color: 0x79b96a, roughness: 0.95 })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        const roadMat = new THREE.MeshStandardMaterial({ color: 0x3c3f47, roughness: 0.85 });
+        const lineMat = new THREE.MeshStandardMaterial({ color: 0xe6d875 });
+        for (let i = -5; i <= 5; i += 1) {
+          const roadX = new THREE.Mesh(new THREE.BoxGeometry(8, 0.05, 900), roadMat);
+          roadX.position.set(i * 32, 0.03, 0);
+          scene.add(roadX);
+
+          const lineX = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 900), lineMat);
+          lineX.position.set(i * 32, 0.06, 0);
+          scene.add(lineX);
+
+          const roadZ = new THREE.Mesh(new THREE.BoxGeometry(900, 0.05, 8), roadMat);
+          roadZ.position.set(0, 0.03, i * 32);
+          scene.add(roadZ);
+        }
+      }
+
+      function buildDowntown() {
+        for (let i = 0; i < 42; i += 1) {
+          const width = 8 + Math.random() * 8;
+          const depth = 8 + Math.random() * 8;
+          const height = 10 + Math.random() * 55;
+          const x = (Math.random() - 0.5) * 560;
+          const z = (Math.random() - 0.5) * 560;
+          if (Math.abs(x) < 130 && Math.abs(z) < 130) continue;
+          const building = new THREE.Mesh(
+            new THREE.BoxGeometry(width, height, depth),
+            new THREE.MeshStandardMaterial({ color: new THREE.Color(`hsl(${Math.floor(Math.random() * 360)},20%,${56 + Math.random() * 18}%)`) })
+          );
+          building.position.set(x, height / 2, z);
+          scene.add(building);
+        }
+      }
+
+      function buildHouse(plot, style, username) {
+        const g = new THREE.Group();
+        const lot = new THREE.Mesh(new THREE.BoxGeometry(plot.width, 0.12, plot.depth), new THREE.MeshStandardMaterial({ color: 0x8fd27b }));
+        lot.position.y = 0.06;
+        g.add(lot);
+
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(10, 6, 8), new THREE.MeshStandardMaterial({ color: style.wallColor }));
+        wall.position.y = 3;
+        g.add(wall);
+
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(7.4, 3.4, 4), new THREE.MeshStandardMaterial({ color: style.roofColor }));
+        roof.rotation.y = Math.PI * 0.25;
+        roof.position.y = 7.4;
+        g.add(roof);
+
+        const door = new THREE.Mesh(new THREE.BoxGeometry(1.8, 3.2, 0.2), new THREE.MeshStandardMaterial({ color: style.doorColor }));
+        door.position.set(0, 1.7, 4.1);
+        g.add(door);
+
+        [-2.5, 2.5].forEach((x) => {
+          const w = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.6, 0.2), new THREE.MeshStandardMaterial({ color: style.windowColor, emissive: 0x223355, emissiveIntensity: 0.5 }));
+          w.position.set(x, 3.8, 4.1);
+          g.add(w);
+        });
+
+        const treeTrunk = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 2.2, 10), new THREE.MeshStandardMaterial({ color: 0x6f4a2f }));
+        treeTrunk.position.set(-6, 1.1, 5.6);
+        g.add(treeTrunk);
+        const treeTop = new THREE.Mesh(new THREE.SphereGeometry(2.2, 16, 16), new THREE.MeshStandardMaterial({ color: style.treeColor }));
+        treeTop.position.set(-6, 3.6, 5.6);
+        g.add(treeTop);
+
+        const tag = makeTextSprite(`${username}'s Plot`, 'rgba(24,60,22,0.82)');
+        tag.position.set(0, 9.8, 0);
+        g.add(tag);
+
+        g.position.set(plot.x, 0, plot.z);
+        scene.add(g);
+      }
+
+      function addEpicFeatures() {
+        // Feature 1: Central fountain
+        const fountainBase = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 1.6, 32), new THREE.MeshStandardMaterial({ color: 0xd8dde8 }));
+        fountainBase.position.set(0, 0.8, 0);
+        scene.add(fountainBase);
+        const water = new THREE.Mesh(new THREE.CylinderGeometry(7.8, 7.8, 0.8, 32), new THREE.MeshStandardMaterial({ color: 0x66bbff, transparent: true, opacity: 0.72 }));
+        water.position.set(0, 1.5, 0);
+        scene.add(water);
+
+        // Feature 2: Hover transit pods
+        const podGroup = new THREE.Group();
+        scene.add(podGroup);
+        for (let i = 0; i < 6; i += 1) {
+          const pod = new THREE.Mesh(new THREE.CapsuleGeometry(0.9, 2.6, 6, 14), new THREE.MeshStandardMaterial({ color: 0xfff2a8, emissive: 0x3a2d08, emissiveIntensity: 0.4 }));
+          pod.userData.orbit = (i / 6) * Math.PI * 2;
+          podGroup.add(pod);
+        }
+
+        // Feature 3: Studio gate portal
+        const gate = new THREE.Mesh(new THREE.TorusGeometry(6, 0.6, 16, 44), new THREE.MeshStandardMaterial({ color: 0x6bc6ff, emissive: 0x11344c, emissiveIntensity: 0.5 }));
+        gate.position.set(0, 6.5, -40);
+        scene.add(gate);
+        const gateText = makeTextSprite('Studio Gate →', 'rgba(16,39,77,0.85)');
+        gateText.position.set(0, 11, -40);
+        scene.add(gateText);
+
+        // Feature 4: Skyline billboard
+        const billboard = new THREE.Mesh(new THREE.BoxGeometry(16, 8, 0.4), new THREE.MeshStandardMaterial({ color: 0x2f3c68, emissive: 0x16233e, emissiveIntensity: 0.38 }));
+        billboard.position.set(34, 9, -18);
+        scene.add(billboard);
+        const bbText = makeTextSprite('Build games from your plot!', 'rgba(18,22,44,0.85)');
+        bbText.position.set(34, 9, -17.4);
+        scene.add(bbText);
+
+        return { water, podGroup, gate };
+      }
+
+      const epic = (() => {
+        buildGroundAndRoads();
+        buildDowntown();
+        return addEpicFeatures();
+      })();
+
+      function updateStatus(text) {
+        statusText.textContent = text;
+      }
+
+      function clampToWorld(position) {
+        position.x = Math.max(-260, Math.min(260, position.x));
+        position.z = Math.max(-260, Math.min(260, position.z));
+      }
+
+      async function fetchJSON(url, options = {}) {
+        const response = await fetch(url, options);
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          window.location.href = '/';
+          return null;
+        }
+        if (!response.ok) throw new Error(data.error || 'Request failed.');
+        return data;
+      }
+
+      async function loadCity() {
+        const me = await fetchJSON('/api/me');
+        if (!me?.user) return;
+        world.meUserId = me.user.id;
+
+        const bootstrap = await fetchJSON('/api/city/bootstrap');
+        if (!bootstrap) return;
+
+        Object.entries(bootstrap.world.plots || {}).forEach(([userId, plot]) => {
+          const house = (bootstrap.world.houses || {})[userId] || {};
+          const player = (bootstrap.players || []).find((p) => p.userId === userId);
+          buildHouse(plot, house, player?.username || 'Player');
+        });
+
+        (bootstrap.players || []).forEach((playerData) => {
+          const entity = ensurePlayer(playerData);
+          if (entity) {
+            entity.target.set(playerData.position?.x || 0, 1.1, playerData.position?.z || 0);
+            entity.root.position.copy(entity.target);
+          }
+        });
+
+        world.me = world.players.get(world.meUserId) || null;
+        updateStatus(`Connected as ${me.user.username}. Players online: ${world.players.size}`);
+        showToast('Welcome home. Your plot is permanent in Sculpt City.');
+      }
+
+      async function syncMyPlayer(force = false) {
+        if (!world.me) return;
+        const now = Date.now();
+        if (!force && now - world.lastSyncAt < world.syncIntervalMs) return;
+        world.lastSyncAt = now;
+
+        await fetchJSON('/api/city/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            position: { x: world.me.root.position.x, y: world.me.root.position.y, z: world.me.root.position.z },
+            rotationY: world.me.root.rotation.y,
+            status: 'Exploring Sculpt City',
+          }),
+        }).catch(() => {});
+      }
+
+      async function pollPlayers() {
+        const now = Date.now();
+        if (now - world.lastPollAt < world.pollIntervalMs) return;
+        world.lastPollAt = now;
+
+        const data = await fetchJSON('/api/city/players').catch(() => null);
+        if (!data?.players) return;
+
+        data.players.forEach((playerData) => {
+          const entity = ensurePlayer(playerData);
+          if (!entity) return;
+          entity.target.set(playerData.position?.x || 0, 1.1, playerData.position?.z || 0);
+          entity.root.rotation.y = playerData.rotationY || 0;
+          if (playerData.chatBubble && playerData.bubbleAt) {
+            const bubbleAge = Date.now() - new Date(playerData.bubbleAt).getTime();
+            if (bubbleAge < 8000) setBubble(entity, playerData.chatBubble);
+          }
+        });
+
+        updateStatus(`Connected as ${world.me?.username || 'player'}. Players online: ${world.players.size}`);
+      }
+
+      async function sendBubble() {
+        const text = chatInput.value.trim();
+        if (!text || !world.me) return;
+        setBubble(world.me, text);
+        chatInput.value = '';
+        await fetchJSON('/api/city/chat-bubble', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        }).catch(() => {});
+      }
+
+      function updateMovement(dt) {
+        if (!world.me) return;
+        const speed = 8.5;
+        const move = new THREE.Vector3();
+        if (world.keyState.w) move.z -= 1;
+        if (world.keyState.s) move.z += 1;
+        if (world.keyState.a) move.x -= 1;
+        if (world.keyState.d) move.x += 1;
+
+        if (move.lengthSq() > 0) {
+          move.normalize().multiplyScalar(speed * dt);
+          world.me.root.position.add(move);
+          clampToWorld(world.me.root.position);
+          world.me.root.rotation.y = Math.atan2(move.x, move.z);
+          syncMyPlayer();
+        }
+
+        camera.position.lerp(new THREE.Vector3(world.me.root.position.x + 10, 9, world.me.root.position.z + 12), 0.07);
+        camera.lookAt(world.me.root.position.x, world.me.root.position.y + 2.2, world.me.root.position.z);
+      }
+
+      function animateEpics(time) {
+        const t = time * 0.001;
+        // day-night cycle
+        const sunY = Math.sin(t * 0.12) * 18 + 22;
+        sun.position.set(Math.cos(t * 0.08) * 25, sunY, Math.sin(t * 0.08) * 25);
+        hemi.intensity = THREE.MathUtils.clamp(0.45 + sunY / 40, 0.35, 1);
+
+        epic.water.material.opacity = 0.58 + Math.sin(t * 1.9) * 0.12;
+
+        epic.podGroup.children.forEach((pod, idx) => {
+          const a = t * 0.35 + pod.userData.orbit;
+          pod.position.set(Math.cos(a) * (26 + idx), 6 + Math.sin(t * 2.2 + idx) * 0.8, Math.sin(a) * (26 + idx));
+          pod.rotation.y = -a;
+        });
+
+        epic.gate.rotation.y += 0.01;
+      }
+
+      function animate(time) {
+        requestAnimationFrame(animate);
+        const dt = 1 / 60;
+
+        updateMovement(dt);
+        animateEpics(time);
+
+        world.players.forEach((entity) => {
+          if (entity.userId !== world.meUserId) {
+            entity.root.position.lerp(entity.target, 0.1);
+          }
+          if (entity.bubble.visible && Date.now() > entity.bubbleUntil) {
+            entity.bubble.visible = false;
+          }
+        });
+
+        pollPlayers();
+        renderer.render(scene, camera);
+      }
+
+      function connectSocketPlaceholder() {
+        const socket = window.io();
+        world.socket = socket;
+        socket.on('connect', () => showToast('Realtime link active.'));
+        socket.on('city:player-placeholder', (payload) => {
+          if (!payload?.userId || payload.userId === world.meUserId) return;
+          const entity = world.players.get(payload.userId);
+          if (!entity) return;
+          entity.target.set(payload.position?.x || 0, 1.1, payload.position?.z || 0);
+        });
+        socket.on('city:bubble-placeholder', (payload) => {
+          if (!payload?.userId) return;
+          const entity = world.players.get(payload.userId);
+          if (!entity) return;
+          setBubble(entity, payload.text || '...');
+        });
+      }
+
+      window.addEventListener('keydown', (event) => {
+        const key = event.key.toLowerCase();
+        if (key in world.keyState) world.keyState[key] = true;
+        if (event.key === 'Enter' && document.activeElement !== chatInput) {
+          chatInput.focus();
+          return;
+        }
+        if (event.key === 'Enter' && document.activeElement === chatInput) {
+          sendBubble();
+        }
+      });
+
+      window.addEventListener('keyup', (event) => {
+        const key = event.key.toLowerCase();
+        if (key in world.keyState) world.keyState[key] = false;
+      });
+
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      bubbleBtn.addEventListener('click', sendBubble);
+      document.getElementById('studioBtn').addEventListener('click', () => { window.location.href = '/create-game.html'; });
+      document.getElementById('dashBtn').addEventListener('click', () => { window.location.href = '/dashboard.html'; });
+
+      loadCity()
+        .then(() => syncMyPlayer(true))
+        .then(() => connectSocketPlaceholder())
+        .then(() => animate(0))
+        .catch((error) => {
+          updateStatus(error.message || 'Failed to load city.');
+          showToast('Could not connect to Sculpt City.');
+        });
+    </script>
+  </body>
+</html>
